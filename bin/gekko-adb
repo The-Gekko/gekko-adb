@@ -1,0 +1,59 @@
+#!/bin/bash
+# Gekko ADB Studio - selector de frontend (GTK 4 por defecto).
+set -euo pipefail
+
+PROJECT_DIR="${GEKKO_ADB_PROJECT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." >/dev/null 2>&1 && pwd)}"
+PYTHON="${GEKKO_ADB_PYTHON:-python3}"
+BACKEND="${GEKKO_ADB_GTK:-auto}"
+PRINT_BACKEND=false
+CLI=false
+ARGS=()
+
+for arg in "$@"; do
+    case "$arg" in
+        --gtk3) BACKEND=gtk3 ;;
+        --gtk4) BACKEND=gtk4 ;;
+        --print-backend) PRINT_BACKEND=true ;;
+        --diagnostics|--version) CLI=true; ARGS+=("$arg") ;;
+        --help)
+            printf '%s\n' \
+                'Uso: gekko-adb [--gtk4|--gtk3] [opción]' \
+                '  --gtk4               Forzar frontend GTK 4' \
+                '  --gtk3               Forzar frontend GTK 3' \
+                '  --print-backend      Mostrar el frontend elegido' \
+                '  --diagnostics        Verificar dependencias y dispositivos' \
+                '  --version            Mostrar versión'
+            exit 0
+            ;;
+        *) ARGS+=("$arg") ;;
+    esac
+done
+
+if $CLI; then
+    exec "$PYTHON" "$PROJECT_DIR/gekko_adb_core.py" "${ARGS[@]}"
+fi
+
+if [[ "$BACKEND" == auto ]]; then
+    if "$PYTHON" -c "import gi; gi.require_version('Gtk','4.0'); from gi.repository import Gtk" 2>/dev/null; then
+        BACKEND=gtk4
+    elif "$PYTHON" -c "import gi; gi.require_version('Gtk','3.0'); from gi.repository import Gtk" 2>/dev/null; then
+        BACKEND=gtk3
+    else
+        echo "ERROR: ni GTK 4 ni GTK 3 disponibles (instala python-gobject + gtk4/gtk3)." >&2
+        exit 1
+    fi
+fi
+
+if $PRINT_BACKEND; then
+    echo "$BACKEND"
+    exit 0
+fi
+
+case "$BACKEND" in
+    gtk4) exec "$PYTHON" "$PROJECT_DIR/gekko-adb-gtk4.py" "${ARGS[@]}" ;;
+    gtk3) exec "$PYTHON" "$PROJECT_DIR/gekko-adb-gtk3.py" "${ARGS[@]}" ;;
+    *)
+        echo "ERROR: backend desconocido: $BACKEND" >&2
+        exit 1
+        ;;
+esac

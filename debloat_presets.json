@@ -1,0 +1,156 @@
+{
+  "version": 1,
+  "presets": [
+    {
+      "id": "samsung_basic",
+      "titulo": "Samsung Bloatware Básico",
+      "icono": "🗑️",
+      "desc": "Samsung Wallet, Pass, Bixby, Facebook Suite, Microsoft 365, OneDrive.",
+      "paquetes": [
+        "com.samsung.android.spay",
+        "com.samsung.android.spayfw",
+        "com.samsung.android.samsungpass",
+        "com.samsung.android.samsungpassautofill",
+        "com.samsung.android.bixby.agent",
+        "com.samsung.android.bixby.wakeup",
+        "com.facebook.katana",
+        "com.facebook.system",
+        "com.facebook.appmanager",
+        "com.facebook.services",
+        "com.microsoft.skydrive",
+        "com.microsoft.office.officehubrow"
+      ]
+    },
+    {
+      "id": "galaxy_ai",
+      "titulo": "Galaxy AI Suite",
+      "icono": "🧠",
+      "desc": "AICore, modelo offline, Vision Intelligence, Smart Suggestions.",
+      "paquetes": [
+        "com.samsung.android.aicore",
+        "com.samsung.android.offline.languagemodel",
+        "com.samsung.android.visionintelligence",
+        "com.samsung.android.wifi.intelligence",
+        "com.samsung.android.smartsuggestions"
+      ]
+    },
+    {
+      "id": "knox_fix",
+      "titulo": "Parche Knox Account Fix",
+      "icono": "🔓",
+      "desc": "MobileService, Cloud y Attestation para neutralizar cierres de sesión.",
+      "paquetes": [
+        "com.samsung.android.mobileservice",
+        "com.samsung.android.scloud",
+        "com.samsung.android.authfw",
+        "com.samsung.android.rubin.app",
+        "com.samsung.android.app.parentalcare"
+      ]
+    },
+    {
+      "id": "samsung_stock",
+      "titulo": "App Stock de Samsung",
+      "icono": "📱",
+      "desc": "Honeyboard, Galaxy Store, Theme Store, Calendario, Grabadora.",
+      "paquetes": [
+        "com.samsung.android.honeyboard",
+        "com.sec.android.app.samsungapps",
+        "com.samsung.android.themestore",
+        "com.samsung.android.calendar",
+        "com.sec.android.app.voicenote"
+      ]
+    },
+    {
+      "id": "google_bloat",
+      "titulo": "Google Bloatware",
+      "icono": "🌐",
+      "desc": "Duo/Meet, YouTube Music, Drive, Fotos, TV, Google One.",
+      "paquetes": [
+        "com.google.android.apps.tachyon",
+        "com.google.android.apps.subscriptions.red",
+        "com.google.android.videos",
+        "com.google.android.apps.photos",
+        "com.google.android.apps.docs"
+      ]
+    },
+    {
+      "id": "custom_purge",
+      "titulo": "Custom Multi-Purge",
+      "icono": "📦",
+      "desc": "Selección masiva de paquetes pesados de fabricantes.",
+      "paquetes": [
+        "com.samsung.android.spay",
+        "com.samsung.android.samsungpass",
+        "com.facebook.katana",
+        "com.samsung.android.bixby.agent",
+        "com.microsoft.office.officehubrow",
+        "com.samsung.android.aicore"
+      ]
+    },
+    {
+      "id": "xiaomi_basic",
+      "titulo": "Xiaomi Bloatware Básico",
+      "icono": "🗑️",
+      "desc": "MSA (anuncios), telemetría, GetApps, limpiador y servicios prescindibles. Redmi/MIUI/HyperOS.",
+      "paquetes": [
+        "com.miui.msa.global",
+        "com.miui.systemAdSolution",
+        "com.miui.analytics",
+        "com.miui.android.fashiongallery",
+        "com.xiaomi.mipicks",
+        "com.miui.cleaner",
+        "com.miui.hybrid",
+        "com.miui.yellowpage",
+        "com.miui.bugreport",
+        "com.xiaomi.midrop",
+        "com.xiaomi.mi_connect_service",
+        "com.miui.miservice",
+        "com.miui.voiceassist"
+      ]
+    },
+    {
+      "id": "hyperos_ai",
+      "titulo": "HyperOS AI & Extras",
+      "icono": "🧠",
+      "desc": "IA, asistente de voz, Mi Pay, Smart Home, Game Center y extras de Xiaomi.",
+      "paquetes": [
+        "com.xiaomi.aiasst",
+        "com.miui.voicetrigger",
+        "com.miui.personalassistant",
+        "com.miui.aod",
+        "com.miui.livewallpaper",
+        "com.xiaomi.gamecenter",
+        "com.xiaomi.vipaccount",
+        "com.xiaomi.mipay",
+        "com.xiaomi.smarthome",
+        "com.miui.smartdevice",
+        "com.xiaomi.mico",
+        "com.xiaomi.mi_connect_service",
+        "com.miui.globalperipherals",
+        "com.xiaomi.joyose",
+        "com.google.android.apps.wellbeing"
+      ]
+    },
+    {
+      "id": "miui_stock",
+      "titulo": "Apps Stock MIUI",
+      "icono": "📱",
+      "desc": "Navegador, video, música, notas, clima, calendario, FM y utilidades desinstalables.",
+      "paquetes": [
+        "com.android.browser",
+        "com.miui.videoplayer",
+        "com.miui.player",
+        "com.miui.notes",
+        "com.miui.weather2",
+        "com.miui.calendar",
+        "com.miui.fm",
+        "com.miui.compass",
+        "com.miui.screenrecorder",
+        "com.xiaomi.scanner",
+        "com.miui.misound",
+        "com.miui.micash",
+        "com.miui.livewallpaper"
+      ]
+    }
+  ]
+}
