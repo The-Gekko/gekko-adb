@@ -93,9 +93,56 @@ python3 -m unittest test_ui_gtk4 -v                # GTK4 (proceso aparte)
 
 ## 📦 Dependencias
 
-- **Arch/Garuda**: `python-gobject gtk3 gtk4 android-tools scrcpy glib2 xdg-utils`
-- **Solus**: `python-gobject libgtk-3 libgtk-4 android-tools scrcpy glib2 xdg-utils`
-- **Opcional**: `matugen` (tema dinámico)
+### 🔧 En tu PC (Linux)
+
+`./install.sh` **instala todo automáticamente** con tu gestor de paquetes.
+Esta es la lista en caso de que quieras hacerlo a mano o saber qué necesita:
+
+| Paquete | Para qué sirve |
+|---|---|
+| `python` | Interpreta la app |
+| `python-gobject` | Bindings Python ↔ GTK |
+| `gtk3` / `gtk4` (Solus: `libgtk-3` / `libgtk-4`) | Toolkit de interfaz gráfica |
+| `android-tools` | Comandos ADB (`adb` + driver USB) |
+| `scrcpy` | Espejo y control de pantalla del teléfono |
+| `glib2` | Librerías base del entorno GTK |
+| `xdg-utils` | Integración con el escritorio |
+| `matugen` *(opcional)* | Tema dinámico sincronizado con tu wallpaper |
+
+Instalación manual (Arch/Garuda):
+
+```bash
+sudo pacman -S --needed python python-gobject gtk3 gtk4 android-tools scrcpy glib2 xdg-utils
+sudo pacman -S matugen   # opcional
+```
+
+Instalación manual (Solus):
+
+```bash
+sudo eopkg install python python-gobject libgtk-3 libgtk-4 android-tools scrcpy glib2 xdg-utils
+```
+
+> Si `matugen` no está instalado, la app usa un tema de respaldo
+> (system/dark/light) sin problemas.
+
+### 📱 En tu teléfono (Android)
+
+1. Abre **Ajustes → Acerca del teléfono** y toca **"Número de compilación"** 7 veces
+   para habilitar las **Opciones de desarrollador**.
+2. En **Ajustes → Opciones de desarrollador**, activa **"Depuración por USB"**.
+3. Conecta el teléfono por USB y acepta el diálogo **"¿Permitir depuración USB?"**.
+
+> Para **Wi-Fi**: en la app usa la opción del servidor ADB (`adb tcpip` + conexión
+> por IP), o desde la terminal:
+>
+> ```bash
+> adb devices                 # verifica que aparece tu equipo
+> adb tcpip 5555              # activa ADB por red
+> adb connect <ip-del-teléfono>:5555
+> ```
+>
+> Si tu dispositivo no se detecta, revisa que existan las reglas **udev** de Android
+> (las instala `android-tools`) y reconecta el cable.
 
 ---
 
