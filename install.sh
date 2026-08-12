@@ -11,6 +11,8 @@ BOLD='\033[1m'
 RESET='\033[0m'
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SRC_DIR="$SCRIPT_DIR"
+GEKKO_ADB_TARBALL="${GEKKO_ADB_TARBALL:-https://github.com/The-Gekko/gekko-adb/archive/refs/heads/main.tar.gz}"
 DATA_HOME="${XDG_DATA_HOME:-$HOME/.local/share}"
 STATE_HOME="${XDG_STATE_HOME:-$HOME/.local/state}"
 CONFIG_HOME="${XDG_CONFIG_HOME:-$HOME/.config}"
@@ -46,6 +48,8 @@ REQUIRED_PACKAGES=(
     scrcpy
     glib2
     xdg-utils
+    xdg-user-dirs
+    curl
 )
 OPTIONAL_PACKAGES=(matugen)
 
@@ -59,6 +63,8 @@ if [[ "$DISTRO" == "solus" ]]; then
         scrcpy
         glib2
         xdg-utils
+        xdg-user-dirs
+        curl
     )
     OPTIONAL_PACKAGES=(matugen)
 fi
@@ -84,6 +90,7 @@ usage() {
 Gekko ADB Studio - instalador Arch/Garuda (pacman) y Solus (eopkg)
 
 Uso: ./install.sh [opciones]
+  o:  curl -fsSL https://raw.githubusercontent.com/The-Gekko/gekko-adb/main/install.sh | bash
 
 Opciones:
   --check         Verificar el entorno sin escribir nada
@@ -91,6 +98,9 @@ Opciones:
   --no-deps       No instalar dependencias con el gestor de paquetes
   --assume-yes    Confirmar la instalación de dependencias automáticamente
   --help          Mostrar esta ayuda
+
+Tras instalar, desinstala con:
+  ~/.local/share/gekko-adb/app/install.sh --uninstall
 
 Distribución detectada: $DISTRO
 Dependencias requeridas: ${REQUIRED_PACKAGES[*]}
@@ -114,6 +124,11 @@ if [[ "$(id -u)" -eq 0 ]]; then
     exit 1
 fi
 
+if ! [[ -t 0 ]]; then
+    ASSUME_YES=true
+    warn "Entrada no interactiva (p. ej. curl | bash); se asume --assume-yes."
+fi
+
 if [[ "$DISTRO" == "unknown" ]]; then
     warn "Distribución no reconocida; asumo Arch (pacman)."
     DISTRO="arch"
@@ -121,7 +136,9 @@ fi
 
 check_package() {
     if [[ "$DISTRO" == "solus" ]]; then
-        eopkg info "$1" >/dev/null 2>&1
+        # eopkg info responde OK con solo existir en el repo (aunque no esté
+        # instalado); por eso se consulta la lista de instalados.
+        eopkg list-installed 2>/dev/null | grep -qx "$1"
     else
         pacman -Q "$1" >/dev/null 2>&1
     fi
@@ -198,6 +215,10 @@ if [[ "${DO_UNINSTALL:-false}" == "true" ]]; then
     if [[ -d "$INSTALL_DIR" ]]; then
         rm -rf "$INSTALL_DIR" && ok "Eliminado: $INSTALL_DIR"
     fi
+    if [[ -f "$ENV_FILE" ]]; then
+        rm -f "$ENV_FILE" && ok "Eliminado: $ENV_FILE"
+    fi
+    rm -f "$APP_DATA_ROOT"/app.bak.* 2>/dev/null || true
     if [[ -d "$APP_DATA_ROOT" ]] && ! ls "$APP_DATA_ROOT" >/dev/null 2>&1; then
         rmdir "$APP_DATA_ROOT" 2>/dev/null || true
     fi
@@ -206,7 +227,41 @@ if [[ "${DO_UNINSTALL:-false}" == "true" ]]; then
     exit 0
 fi
 
+# ------------------------------------------------------------- fuentes
+# El script funciona desde un checkout (SRC_DIR = SCRIPT_DIR) o standalone
+# vía curl/wget/python (descarga el tarball del repo y SRC_DIR apunta ahí).
+sources_available() {
+    [[ -f "$SRC_DIR/gekko_adb_core.py" ]]
+}
+
+fetch_sources() {
+    local tmp tar_file src
+    tmp="$(mktemp -d)"
+    trap "rm -rf '$tmp'" EXIT
+    info "Modo standalone: descargando fuentes del repo…"
+    tar_file="$tmp/gekko-adb.tar.gz"
+    if command -v curl >/dev/null 2>&1; then
+        curl -fsSL "$GEKKO_ADB_TARBALL" -o "$tar_file"
+    elif command -v wget >/dev/null 2>&1; then
+        wget -qO "$tar_file" "$GEKKO_ADB_TARBALL"
+    else
+        python3 -c 'import sys, urllib.request; urllib.request.urlretrieve(sys.argv[1], sys.argv[2])' \
+            "$GEKKO_ADB_TARBALL" "$tar_file"
+    fi
+    tar -xzf "$tar_file" -C "$tmp"
+    src="$(find "$tmp" -maxdepth 2 -name 'gekko_adb_core.py' -print -quit | xargs -r dirname)"
+    if [[ -z "$src" || ! -f "$src/gekko_adb_core.py" ]]; then
+        fail "No se pudo obtener el código del proyecto. Revisa la red o GEKKO_ADB_TARBALL."
+        exit 1
+    fi
+    SRC_DIR="$src"
+    ok "Fuentes obtenidas: $src"
+}
+
 # ------------------------------------------------------------- instalación
+if ! sources_available; then
+    fetch_sources
+fi
 info "Instalando en $INSTALL_DIR…"
 mkdir -p "$INSTALL_DIR" "$BIN_DIR" "$APP_DIR" "$ICON_DIR" "$METAINFO_DIR" "$LOG_DIR"
 
@@ -219,16 +274,17 @@ fi
 
 install_core() {
     mkdir -p "$INSTALL_DIR"
-    cp "$SCRIPT_DIR/gekko_adb_core.py" "$INSTALL_DIR/"
-    cp "$SCRIPT_DIR/gekko_adb_theme.py" "$INSTALL_DIR/"
-    cp "$SCRIPT_DIR/gekko-adb-gtk4.py" "$INSTALL_DIR/"
-    cp "$SCRIPT_DIR/gekko-adb-gtk3.py" "$INSTALL_DIR/"
-    cp "$SCRIPT_DIR/adb_commands.json" "$INSTALL_DIR/"
-    cp "$SCRIPT_DIR/debloat_presets.json" "$INSTALL_DIR/"
+    cp "$SRC_DIR/gekko_adb_core.py" "$INSTALL_DIR/"
+    cp "$SRC_DIR/gekko_adb_theme.py" "$INSTALL_DIR/"
+    cp "$SRC_DIR/gekko-adb-gtk4.py" "$INSTALL_DIR/"
+    cp "$SRC_DIR/gekko-adb-gtk3.py" "$INSTALL_DIR/"
+    cp "$SRC_DIR/adb_commands.json" "$INSTALL_DIR/"
+    cp "$SRC_DIR/debloat_presets.json" "$INSTALL_DIR/"
+    cp "$SRC_DIR/install.sh" "$INSTALL_DIR/install.sh"
     mkdir -p "$INSTALL_DIR/bin" "$INSTALL_DIR/assets"
-    cp "$SCRIPT_DIR/bin/gekko-adb" "$INSTALL_DIR/bin/gekko-adb"
-    cp "$SCRIPT_DIR/assets/gekko-adb.png" "$INSTALL_DIR/assets/gekko-adb.png"
-    cp "$SCRIPT_DIR/assets/gekko-adb-512.png" "$INSTALL_DIR/assets/gekko-adb-512.png"
+    cp "$SRC_DIR/bin/gekko-adb" "$INSTALL_DIR/bin/gekko-adb"
+    cp "$SRC_DIR/assets/gekko-adb.png" "$INSTALL_DIR/assets/gekko-adb.png"
+    cp "$SRC_DIR/assets/gekko-adb-512.png" "$INSTALL_DIR/assets/gekko-adb-512.png"
     chmod +x "$INSTALL_DIR/bin/gekko-adb"
 }
 
@@ -268,7 +324,7 @@ EOF
 ok "Desktop entry: $DESKTOP_FILE"
 
 # Icono
-cp "$SCRIPT_DIR/assets/gekko-adb-512.png" "$ICON_FILE"
+cp "$SRC_DIR/assets/gekko-adb-512.png" "$ICON_FILE"
 ok "Ícono: $ICON_FILE"
 
 # Refrescar caché de íconos hicolor
@@ -317,4 +373,4 @@ fi
 ok "Instalación completada."
 info "Inicia la app con: gekko-adb"
 info "Ruta de instalación: $INSTALL_DIR"
-info "Para desinstalar: $0 --uninstall"
+info "Para desinstalar: $INSTALL_DIR/install.sh --uninstall"

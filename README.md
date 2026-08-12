@@ -35,7 +35,27 @@
 
 ## 🚀 Instalación
 
-### Arch / Garuda
+### Instalación rápida (Arch / Garuda / Solus)
+
+Un solo comando — el instalador detecta tu distribución y los paquetes
+(`pacman` en Arch/Garuda, `eopkg` en Solus):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/The-Gekko/gekko-adb/main/install.sh | bash
+```
+
+> Al instalar por pipe (`curl … | bash`) la entrada no es interactiva y el
+> instalador confirma las dependencias automáticamente (`sudo` te pedirá la
+> contraseña igualmente). Si prefieres confirmar paquete a paquete o pasar
+> opciones, guarda el script primero:
+>
+> ```bash
+> curl -fsSL https://raw.githubusercontent.com/The-Gekko/gekko-adb/main/install.sh -o /tmp/gekko-install.sh
+> bash /tmp/gekko-install.sh            # con prompt interactivo
+> bash /tmp/gekko-install.sh --no-deps  # sin tocar el gestor de paquetes
+> ```
+
+### Desde el código fuente (desarrollo)
 
 ```bash
 git clone https://github.com/The-Gekko/gekko-adb.git
@@ -44,17 +64,32 @@ cd gekko-adb
 gekko-adb             # lanza la app
 ```
 
-### Solus
-
-```bash
-git clone https://github.com/The-Gekko/gekko-adb.git
-cd gekko-adb
-./install.sh          # detecta eopkg y usa libgtk-3/libgtk-4
-gekko-adb
-```
-
 > El instalador respeta los estándares XDG, nunca corre como root y crea
 > el launcher `gekko-adb`, el desktop entry `com.gekko.adb` y el ícono hicolor.
+> Si no hay `curl` o `wget`, el instalador descarga las fuentes con Python.
+
+---
+
+## 🗑️ Desinstalación
+
+La app guarda una copia del instalador en su carpeta, así puedes desinstalar
+sin necesidad de tener el código fuente:
+
+```bash
+~/.local/share/gekko-adb/app/install.sh --uninstall
+```
+
+O por curl, sin descargar nada más:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/The-Gekko/gekko-adb/main/install.sh -o /tmp/gekko-uninstall.sh
+bash /tmp/gekko-uninstall.sh --uninstall
+```
+
+> La desinstalación **conserva** tu configuración, logs y presets en
+> `~/.config/gekko-adb` y `~/.local/state/gekko-adb/logs`. Elimina el launcher,
+> el desktop entry, el ícono y la app instalada. Si quieres borrarlo todo,
+> elimina esas carpetas manualmente.
 
 ---
 
@@ -64,7 +99,7 @@ gekko-adb
 gekko-adb                     # abrir la app instalada
 ./bin/gekko-adb               # abrir desde el checkout (dev)
 ./install.sh --check          # diagnóstico sin escribir nada
-./install.sh --uninstall      # desinstalar (conserva config y logs)
+~/.local/share/gekko-adb/app/install.sh --uninstall  # desinstalar
 ```
 
 ---
@@ -108,23 +143,28 @@ Esta es la lista en caso de que quieras hacerlo a mano o saber qué necesita:
 | `scrcpy` | Espejo y control de pantalla del teléfono |
 | `glib2` | Librerías base del entorno GTK |
 | `xdg-utils` | Integración con el escritorio |
+| `xdg-user-dirs` | Detecta `~/Descargas`, `~/Imágenes`… según tu idioma |
+| `curl` | Descarga de fuentes en la instalación por un comando |
 | `matugen` *(opcional)* | Tema dinámico sincronizado con tu wallpaper |
 
 Instalación manual (Arch/Garuda):
 
 ```bash
-sudo pacman -S --needed python python-gobject gtk3 gtk4 android-tools scrcpy glib2 xdg-utils
+sudo pacman -S --needed python python-gobject gtk3 gtk4 android-tools scrcpy glib2 xdg-utils xdg-user-dirs curl
 sudo pacman -S matugen   # opcional
 ```
 
 Instalación manual (Solus):
 
 ```bash
-sudo eopkg install python python-gobject libgtk-3 libgtk-4 android-tools scrcpy glib2 xdg-utils
+sudo eopkg install python python-gobject libgtk-3 libgtk-4 android-tools scrcpy glib2 xdg-utils xdg-user-dirs curl
 ```
 
 > Si `matugen` no está instalado, la app usa un tema de respaldo
-> (system/dark/light) sin problemas.
+> (system/dark/light) sin problemas. En **Solus** `matugen` no está en los
+> repos, así que la app usará el tema del sistema (todo lo demás funciona
+> igual: los paquetes `libgtk-3`/`libgtk-4`, `android-tools`, `scrcpy` y
+> `python-gobject` existen en los repos oficiales).
 
 ### 📱 En tu teléfono (Android)
 
