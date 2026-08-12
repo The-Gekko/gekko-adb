@@ -52,12 +52,47 @@ gekko-adb                                          # lanzar la app instalada
 - [x] Verificar en hardware real (SM-S928B, Android 16/API 36): dashboard con
       datos del dispositivo, tema matugen, sin errores al abrir.
 
+### Completed
+- [x] Corregido el parseo de batería en `get_device_info()`: antes matcheaba substrings
+      (`'level:' in line`) sobre todo el output de `dumpsys battery` — incluyendo
+      `[EventLogBuffer]` y timestamps — dando basura (`34%`, `3.4 °C`, `0.034 V`, `Issue`
+      en el S24; `-1%` en MIUI por `Capacity level: -1`). Ahora `_parse_battery_state()`
+      parsea solo la sección `Current Battery Service state:` con match estricto,
+      `-1`/`null`→`N/A`, normaliza `level` con `scale` y mapea `status`/`health`.
+- [x] Cadena de fallback de batería: `dumpsys battery` → `dumpsys batteryproperties`
+      → sysfs `/sys/class/power_supply/battery/*` (best-effort; S24 no expone sysfs).
+- [x] Endurecidos `wm size`/`wm density` (Override > Forced > Physical vía `_wm_value`),
+      `nav_mode` (`null`→`Predeterminado`) y `model` (sin doble espacio).
+- [x] Fixtures reales en `tests/fixtures/` (dumpsys battery del S24, MIUI con
+      `Capacity level: -1`, AOSP con `scale`) + tests de regresión en `test_core.py`
+      (fake adb ruidoso que reproduce el bug).
+- [x] Verificado en hardware real (SM-S928B): dashboard y core coinciden con los valores
+      del Settings del dispositivo (78 %, 36.3 °C, 4.182 V, Cargando, Bien).
+
 ### In Progress
 - (ninguno)
 
 ### Backlog
 - [ ] Probar flujos largos (scrcpy, logcat, boot, debloat) con el dispositivo real.
 - [ ] Verificar la instalación en Solus (eopkg) en hardware/VM real.
+
+### Checklist de verificación read-only (S24, ADB USB)
+Para probar comandos del catálogo sin riesgo, ejecutar estos y confirmar que el
+resultado es coherente:
+- [ ] `devices`, `version`, `host_features`, `mdns check`, `mdns services`
+- [ ] `getprop` (consulta), `getprop <clave>`
+- [ ] Roles: `role_holders` (lectura de HOME/SMS/DIALER)
+- [ ] `dumpsys battery`, `dumpsys meminfo`, `top` (CPU)
+- [ ] `list_packages`, `processes`, `logcat_read` (nivel I + filtro), `logcat_clear`
+- [ ] `forward --list`, `reverse --list`
+- [ ] `screenshot` (captura a Imágenes), `extract_apk` de una app del sistema
+- [ ] `scrcpy` estándar y `--record` (cortos), `wm size/density` solo consulta vía
+      dashboard (no tocar sin saber restaurar)
+- [ ] `restore` de un paquete de stock para validar `install-existing` sin riesgo
+
+Destructivos/cambiantes (requieren confirmar): `install/uninstall`, `pm disable`,
+`settings put`, `nav_mode`, `anim_scale`, `density`, `wm_size`, `role_set`, `reboot`,
+`root/remount`, `debloat_preset`, `push/pull/sync/quick_pull`, `tcpip/connect`.
 
 ## Context
 

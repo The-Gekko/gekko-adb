@@ -1,0 +1,17 @@
+Current Battery Service state:
+  AC powered: false
+  USB powered: true
+  Wireless powered: false
+  status: 2
+  health: 2
+  present: true
+  level: 60
+  scale: 100
+  voltage: 4100
+  temperature: 300
+  technology: Li-ion
+  Capacity level: -1
+  Charging state: 1
+  Charging policy: 0
+[EventLogBuffer]
+06-08 12:01:02.345  Sending ACTION_BATTERY_CHANGED: level:59, status:2, health:2, remain:0, voltage:4098, temperature:298

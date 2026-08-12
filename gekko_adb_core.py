@@ -123,6 +123,152 @@ def get_devices():
     return devs
 
 
+_BATTERY_HEALTH = {
+    '1': 'Desconocido', '2': 'Bien', '3': 'Sobrecalentado', '4': 'Muerto',
+    '5': 'Sobrevoltaje', '6': 'Falla inespecífica', '7': 'Frío',
+}
+_BATTERY_STATUS = {
+    '1': 'Desconocido', '2': 'Cargando', '3': 'Descargando',
+    '4': 'Sin carga', '5': 'Llena',
+}
+
+
+def _battery_clean(raw):
+    if raw is None:
+        return None
+    val = str(raw).strip()
+    if not val or val in ('-1', 'null'):
+        return None
+    return val
+
+
+def _parse_battery_state(output):
+    """Extrae {clave: valor} solo de la sección de estado de `dumpsys battery`.
+
+    El match es estricto: corta en la primera sección con corchetes (p. ej.
+    `[EventLogBuffer]`), así las líneas con timestamps y `Capacity level: -1`
+    nunca contaminan `level`/`voltage`/`temperature`/`health`.
+    """
+    fields = {}
+    in_state = False
+    for ln in output.splitlines():
+        stripped = ln.strip()
+        if not in_state:
+            if stripped.startswith('Current Battery Service state:'):
+                in_state = True
+            continue
+        if stripped.startswith('['):
+            break
+        if ':' in ln:
+            key, _, val = ln.partition(':')
+            fields[key.strip()] = val.strip()
+    return fields
+
+
+def _parse_battery_properties(output):
+    """Parsea `dumpsys batteryproperties` a los mismos campos de estado."""
+    remap = {
+        'battery_level': 'level', 'battery_scale': 'scale',
+        'battery_status': 'status', 'battery_health': 'health',
+        'battery_temperature': 'temperature', 'battery_voltage': 'voltage',
+    }
+    fields = {}
+    for ln in output.splitlines():
+        if ':' in ln:
+            key, _, val = ln.partition(':')
+            fields[key.strip()] = val.strip()
+    return {dst: fields[src] for src, dst in remap.items() if fields.get(src)}
+
+
+def _normalize_battery(fields):
+    """Convierte campos crudos de batería en valores numéricos normalizados.
+
+    `level` se normaliza con `scale` y se acota a 0-100; `-1`/`null` son
+    desconocidos. Nunca devuelve un nivel negativo.
+    """
+    out = {}
+    level = _battery_clean(fields.get('level'))
+    if level is not None:
+        try:
+            pct = int(level)
+            scale = _battery_clean(fields.get('scale'))
+            if scale:
+                s = int(scale)
+                if s > 0:
+                    pct = pct * 100 // s
+            out['level'] = max(0, min(100, pct))
+        except ValueError:
+            pass
+    temp = _battery_clean(fields.get('temperature'))
+    if temp is not None:
+        try:
+            out['temp_tenths'] = int(float(temp))
+        except ValueError:
+            pass
+    volt = _battery_clean(fields.get('voltage'))
+    if volt is not None:
+        try:
+            out['voltage_mv'] = int(float(volt))
+        except ValueError:
+            pass
+    status = _battery_clean(fields.get('status'))
+    if status:
+        out['status'] = status
+    health = _battery_clean(fields.get('health'))
+    if health:
+        out['health'] = health
+    return out
+
+
+def _battery_sysfs():
+    """Lee /sys/class/power_supply/battery/* (best-effort, no Samsung)."""
+    fields = {}
+
+    def cat(name):
+        res = run_adb(['shell', 'cat', f'/sys/class/power_supply/battery/{name}'])
+        return res['stdout'].strip()
+
+    for src, dst in (('capacity', 'level'), ('temp', 'temperature')):
+        val = cat(src)
+        if val and val.isdigit():
+            fields[dst] = val
+    volt = cat('voltage_now')
+    if volt and volt.isdigit():
+        fields['voltage'] = str(int(volt) // 1000)  # µV → mV
+    for src, dst, mapping in (
+            ('status', 'status',
+             {'Charging': '2', 'Discharging': '3', 'Full': '5', 'Not charging': '4'}),
+            ('health', 'health',
+             {'Good': '2', 'Overheat': '3', 'Dead': '4', 'Over voltage': '5', 'Cold': '7'})):
+        val = cat(src)
+        if val:
+            fields[dst] = mapping.get(val, val)
+    return _normalize_battery(fields)
+
+
+def get_battery():
+    """Batería con cadena de fallback: dumpsys battery → batteryproperties → sysfs."""
+    dumpsys = _normalize_battery(
+        _parse_battery_state(run_adb(['shell', 'dumpsys', 'battery'])['stdout']))
+    if dumpsys:
+        return dumpsys
+    props = _normalize_battery(
+        _parse_battery_properties(run_adb(['shell', 'dumpsys', 'batteryproperties'])['stdout']))
+    if props:
+        return props
+    return _battery_sysfs()
+
+
+def _wm_value(output, kind):
+    """Valor efectivo de `wm {kind}` (Override > Forced > Physical)."""
+    for prefix in ('Override', 'Forced', 'Physical'):
+        marker = f'{prefix} {kind}:'
+        for ln in output.splitlines():
+            if ln.strip().startswith(marker):
+                return ln.split(':', 1)[1].strip()
+    return ''
+
+
 def get_device_info():
     devices = get_devices()
     if not devices:
@@ -162,24 +308,18 @@ def get_device_info():
         se = shell(['getenforce']).strip() or 'N/A'
         secure = f'SELinux {se}'
 
-    battery = shell(['dumpsys', 'battery'])
-    level, temp, volt, health = 'N/A', 'N/A', 'N/A', 'N/A'
-    try:
-        for line in battery.splitlines():
-            if 'level:' in line:
-                level = line.split(':')[1].strip() + '%'
-            if 'temperature:' in line:
-                temp = f"{int(line.split(':')[1].strip()) / 10.0} °C"
-            if 'voltage:' in line:
-                volt = f"{int(line.split(':')[1].strip()) / 1000.0} V"
-            if 'health:' in line:
-                health = 'Good' if line.split(':')[1].strip() == '2' else 'Issue'
-    except (ValueError, IndexError):
-        pass
+    bat = get_battery()
+    level = f"{bat['level']}%" if 'level' in bat else 'N/A'
+    temp = f"{bat['temp_tenths'] / 10.0:g} °C" if 'temp_tenths' in bat else 'N/A'
+    volt = (f"{bat['voltage_mv'] / 1000.0:.3f}".rstrip('0').rstrip('.') + ' V'
+            if 'voltage_mv' in bat else 'N/A')
+    health = _BATTERY_HEALTH.get(bat.get('health'), 'N/A')
+    status = _BATTERY_STATUS.get(bat.get('status'), 'N/A')
 
-    wm_size = shell(['wm', 'size']).replace('Physical size: ', '').strip()
-    wm_density = shell(['wm', 'density']).replace('Physical density: ', '').strip()
-    nav_mode = shell(['settings', 'get', 'secure', 'navigation_mode']).strip()
+    wm_size = _wm_value(shell(['wm', 'size']), 'size') or 'N/A'
+    wm_density = _wm_value(shell(['wm', 'density']), 'density') or 'N/A'
+    nav = shell(['settings', 'get', 'secure', 'navigation_mode']).strip()
+    nav_mode = {'2': 'Gestos', '1': '3 Botones'}.get(nav, 'Predeterminado')
     home_role = shell(['cmd', 'role', 'get-role-holders', 'android.app.role.HOME']).strip()
     sms_role = shell(['cmd', 'role', 'get-role-holders', 'android.app.role.SMS']).strip()
     dialer_role = shell(['cmd', 'role', 'get-role-holders', 'android.app.role.DIALER']).strip()
@@ -187,7 +327,7 @@ def get_device_info():
     return {
         'connected': True,
         'serial': serial,
-        'model': f"{brand.upper()} {model}".strip(),
+        'model': ' '.join(x for x in (brand.upper(), model) if x).strip(),
         'marca': marca,
         'android': f"Android {android} (API {sdk})",
         'abi': abi,
@@ -196,9 +336,10 @@ def get_device_info():
         'temperature': temp,
         'voltage': volt,
         'health': health,
+        'battery_status': status,
         'display': wm_size,
         'density': wm_density,
-        'nav_mode': 'Gestos' if nav_mode == '2' else '3 Botones',
+        'nav_mode': nav_mode,
         'home_role': home_role,
         'sms_role': sms_role,
         'dialer_role': dialer_role,

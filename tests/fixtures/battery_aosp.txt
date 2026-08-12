@@ -1,0 +1,13 @@
+Current Battery Service state:
+  AC powered: true
+  USB powered: false
+  Wireless powered: false
+  Dock powered: false
+  status: 2
+  health: 2
+  present: true
+  level: 40
+  scale: 50
+  voltage: 4000
+  temperature: 300
+  technology: Li-ion

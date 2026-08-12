@@ -45,7 +45,7 @@ def _fake_adb(path):
         '          ro.product.cpu.abi) echo arm64-v8a;;\n'
         '          ro.boot.warranty_bit) echo 1;;\n'
         '        esac;;\n'
-        '      dumpsys) shift; [[ "$1" == "battery" ]] && echo -e "  level: 27\\n  temperature: 270\\n  voltage: 4200\\n  health: 2";;\n'
+        '      dumpsys) shift; [[ "$1" == "battery" ]] && echo -e "Current Battery Service state:\\n  status: 2\\n  health: 2\\n  present: true\\n  level: 27\\n  scale: 100\\n  voltage: 4200\\n  temperature: 270";;\n'
         '      wm) shift; [[ "$1" == "size" ]] && echo "Physical size: 1440x3120"; [[ "$1" == "density" ]] && echo "Physical density: 600";;\n'
         '      settings) shift; [[ "$1" == "get" && "$3" == "navigation_mode" ]] && echo 2;;\n'
         '      cmd) shift; [[ "$1" == "role" ]] && shift && echo "com.sec.android.app.launcher";;\n'
@@ -107,7 +107,7 @@ class TestGtk3(unittest.TestCase):
         cap = self._run_until_model(self.app)
         self.assertEqual(cap.get('model'), 'SAMSUNG SM-S928B')
         self.assertEqual(cap.get('android'), 'Android 16 (API 36) [arm64-v8a]')
-        self.assertEqual(cap.get('battery'), '27% | 27.0 °C | 4.2 V (Good)')
+        self.assertEqual(cap.get('battery'), '27% | 27 °C | 4.2 V (Bien)')
         self.assertEqual(cap.get('secure'), 'Knox 0x1 (Tripped)')
         self.assertEqual(cap.get('display'), '1440x3120 @ 600')
         self.assertEqual(cap.get('nav_mode'), 'Gestos')

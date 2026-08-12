@@ -32,6 +32,7 @@ CONFIG_FAKE.mkdir(parents=True)
     encoding='utf-8')
 
 PROJECT_DIR = Path(__file__).resolve().parent
+FIXTURES = PROJECT_DIR / 'tests' / 'fixtures'
 
 
 def _fake_adb_script(path):
@@ -60,7 +61,7 @@ case "$1" in
             dumpsys)
                 shift
                 if [[ "$1" == "battery" ]]; then
-                    echo -e "  level: 87\\n  temperature: 310\\n  voltage: 4200\\n  health: 2"
+                    echo -e "Current Battery Service state:\\n  AC powered: true\\n  USB powered: true\\n  status: 2\\n  health: 2\\n  present: true\\n  level: 75\\n  scale: 100\\n  voltage: 4156\\n  temperature: 357\\n  technology: Li-ion\\n  Capacity level: -1\\n[EventLogBuffer]\\n08-11 18:34:14.721  Sending ACTION_BATTERY_CHANGED: level:72, status:2, health:2, voltage:4120, temperature:345\\n08-11 18:34:45.195  Sending ACTION_BATTERY_CHANGED: level:73, status:2, health:2, voltage:4124, temperature:347"
                 fi
                 exit 0;;
             wm)
@@ -174,8 +175,11 @@ class TestEjecucion(unittest.TestCase):
         info = core.get_device_info()
         self.assertTrue(info['connected'])
         self.assertEqual(info['model'], 'SAMSUNG SM-S928B')
-        self.assertEqual(info['battery'], '87%')
-        self.assertEqual(info['temperature'], '31.0 °C')
+        self.assertEqual(info['battery'], '75%')
+        self.assertEqual(info['temperature'], '35.7 °C')
+        self.assertEqual(info['voltage'], '4.156 V')
+        self.assertEqual(info['health'], 'Bien')
+        self.assertEqual(info['battery_status'], 'Cargando')
         self.assertEqual(info['nav_mode'], 'Gestos')
         self.assertEqual(info['secure'], 'Knox 0x0 (Valid)')
 
@@ -204,7 +208,7 @@ case "$1" in
             dumpsys)
                 shift
                 if [[ "$1" == "battery" ]]; then
-                    echo -e "  level: 92\\n  temperature: 290\\n  voltage: 4100\\n  health: 2"
+                    echo -e "Current Battery Service state:\\n  status: 2\\n  health: 2\\n  present: true\\n  level: 92\\n  scale: 100\\n  voltage: 4100\\n  temperature: 290\\n  Capacity level: -1"
                 fi
                 exit 0;;
             wm)
@@ -241,6 +245,8 @@ esac
             self.assertEqual(info['marca'], 'xiaomi')
             self.assertEqual(info['secure'], 'Bootloader Bloqueado · Verified green')
             self.assertEqual(info['battery'], '92%')
+            self.assertEqual(info['temperature'], '29 °C')
+            self.assertEqual(info['health'], 'Bien')
             self.assertEqual(info['home_role'], 'com.miui.home')
         finally:
             core.ADB_EXEC = old
@@ -281,6 +287,78 @@ esac
         target = core.user_dir('MUSIC')
         self.assertEqual(target, str(HOME_FAKE / 'Música'))
         self.assertTrue(Path(target).is_dir())
+
+
+class TestBateria(unittest.TestCase):
+    def _norm(self, text):
+        return core._normalize_battery(core._parse_battery_state(text))
+
+    def test_samsung_real(self):
+        text = (FIXTURES / 'battery_samsung_s24.txt').read_text(encoding='utf-8')
+        data = self._norm(text)
+        self.assertEqual(data['level'], 75)
+        self.assertEqual(data['temp_tenths'], 357)
+        self.assertEqual(data['voltage_mv'], 4156)
+        self.assertEqual(data['health'], '2')
+        self.assertEqual(data['status'], '2')
+
+    def test_eventlog_no_contamina(self):
+        text = """Current Battery Service state:
+  status: 2
+  health: 2
+  level: 75
+  scale: 100
+  voltage: 4156
+  temperature: 357
+  Capacity level: -1
+[EventLogBuffer]
+08-11 18:34:14.721  Sending ACTION_BATTERY_CHANGED: level:72, health:2, voltage:4120, temperature:345
+08-11 18:34:45.195  Sending ACTION_BATTERY_CHANGED: level:73, health:2, voltage:4124, temperature:347
+"""
+        data = self._norm(text)
+        self.assertEqual(data['level'], 75)
+        self.assertEqual(data['temp_tenths'], 357)
+        self.assertEqual(data['voltage_mv'], 4156)
+        self.assertEqual(data['health'], '2')
+
+    def test_capacity_negativo_es_desconocido(self):
+        text = (FIXTURES / 'battery_miui.txt').read_text(encoding='utf-8')
+        data = self._norm(text)
+        self.assertEqual(data['level'], 60)
+        self.assertNotEqual(data['level'], -1)
+        self.assertGreaterEqual(data['level'], 0)
+
+    def test_escala_normaliza_nivel(self):
+        text = (FIXTURES / 'battery_aosp.txt').read_text(encoding='utf-8')
+        data = self._norm(text)
+        self.assertEqual(data['level'], 80)
+
+    def test_nivel_jamas_negativo(self):
+        for name in ('battery_samsung_s24.txt', 'battery_miui.txt', 'battery_aosp.txt'):
+            text = (FIXTURES / name).read_text(encoding='utf-8')
+            data = self._norm(text)
+            self.assertGreaterEqual(data.get('level', 0), 0, name)
+
+    def test_batteryproperties_parse(self):
+        text = """BatteryPropertiesRegistrar:
+  ac_present: false
+  battery_status: 3
+  battery_level: 75
+  battery_scale: 100
+  battery_health: 2
+  battery_voltage: 4156
+  battery_temperature: 357
+"""
+        data = core._normalize_battery(core._parse_battery_properties(text))
+        self.assertEqual(data['level'], 75)
+        self.assertEqual(data['voltage_mv'], 4156)
+
+    def test_wm_override_prioritario(self):
+        self.assertEqual(core._wm_value("Physical size: 1440x3120\nOverride size: 1080x2400", 'size'),
+                         '1080x2400')
+        self.assertEqual(core._wm_value("Physical size: 1440x3120", 'size'), '1440x3120')
+        self.assertEqual(core._wm_value("", 'size'), '')
+        self.assertEqual(core._wm_value("Physical density: 600", 'density'), '600')
 
 
 class TestCommandWorker(unittest.TestCase):
