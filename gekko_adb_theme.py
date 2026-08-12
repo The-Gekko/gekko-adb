@@ -342,20 +342,22 @@ def get_theme_css(theme):
             return _render(_DARK), None, 'matugen:nodisponible'
         colors = _parse_matugen_colors(css_path)
         palette = dict(_DARK)
+        # Nombres Material/material-you primero; si el template es de tipo GTK
+        # (theme_bg_color, accent_color...), se usan esos al final de cada lista.
         mapa = {
-            'bg': ['base', 'bg0_hard', 'bg'],
-            'sidebar': ['surface0', 'base', 'bg0'],
-            'card': ['surface1', 'surface0', 'surface'],
-            'hover': ['surface2', 'surface1'],
-            'pressed': ['surface3', 'surface2'],
-            'text': ['on_base', 'text', 'foreground'],
-            'sub': ['on_surface_variant', 'surface2', 'text'],
-            'primary': ['primary', 'accent', 'green'],
-            'on_primary': ['on_primary', 'on_accent'],
+            'bg': ['base', 'bg0_hard', 'bg', 'window_bg_color', 'theme_bg_color'],
+            'sidebar': ['surface0', 'base', 'bg0', 'sidebar_bg_color', 'window_bg_color'],
+            'card': ['surface1', 'surface0', 'surface', 'card_bg_color', 'popover_bg_color', 'dialog_bg_color'],
+            'hover': ['surface2', 'surface1', 'popover_bg_color', 'headerbar_bg_color'],
+            'pressed': ['surface3', 'surface2', 'headerbar_bg_color', 'card_bg_color'],
+            'text': ['on_base', 'text', 'foreground', 'window_fg_color', 'theme_fg_color', 'view_fg_color'],
+            'sub': ['on_surface_variant', 'surface2', 'text', 'sidebar_fg_color', 'headerbar_fg_color'],
+            'primary': ['primary', 'accent', 'green', 'accent_color', 'accent_bg_color', 'theme_selected_bg_color'],
+            'on_primary': ['on_primary', 'on_accent', 'accent_fg_color'],
             'warn': ['warning', 'orange', 'warn'],
-            'error': ['error', 'red'],
+            'error': ['error', 'red', 'destructive_color', 'destructive_bg_color'],
             'blue': ['secondary', 'blue'],
-            'border': ['surface2', 'surface1'],
+            'border': ['surface2', 'surface1', 'sidebar_backdrop_color', 'card_bg_color'],
         }
         for clave, candidatos in mapa.items():
             for cand in candidatos:
