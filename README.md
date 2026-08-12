@@ -7,6 +7,7 @@
 **Master Suite de control ADB para Linux** · nativa GTK · tema **Matugen** dinámico
 
 *Creado por [The-Gekko](https://github.com/The-Gekko)*
+*Imagen del ícono generada por IA — Google Gemini (Nano Banana)*
 
 ![Linux](https://img.shields.io/badge/Linux-Garuda%2FArch%2FSolus-0ea5e9?style=flat-square&logo=linux&logoColor=white)
 ![GTK](https://img.shields.io/badge/GTK-3%20%2F%204-4ea5d4?style=flat-square&logo=gtk&logoColor=white)
