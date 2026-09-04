@@ -16,8 +16,9 @@ usage() {
         'Uso: gekko-adb [--gtk4|--gtk3] [opción]' \
         '  --gtk4               Forzar frontend GTK 4' \
         '  --gtk3               Forzar frontend GTK 3' \
-        '  --print-backend      Mostrar el frontend elegido' \
-        '  --diagnostics        Verificar dependencias y dispositivos' \
+        '  --print-backend      Mostrar el frontend elegido (no abre la app)' \
+        '  --diagnostics        Verificar dependencias y dispositivos (CLI, sin GTK)' \
+        '  --json               Estado de conexión y dispositivos en JSON (CLI, sin GTK)' \
         '  --version            Mostrar versión' \
         '  --help, -h           Esta ayuda' \
         '' \

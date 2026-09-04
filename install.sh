@@ -39,6 +39,7 @@ LOG_DIR="$STATE_HOME/gekko-adb/logs"
 # Detección de distribución (Arch/Garuda/Manjaro → pacman, Solus → eopkg)
 DISTRO="unknown"
 if [[ -r /etc/os-release ]]; then
+    # shellcheck source=/dev/null
     . /etc/os-release
     case "${ID:-}" in
         arch|garuda|manjaro|endeavouros|cachyos) DISTRO="arch" ;;
@@ -85,6 +86,7 @@ fi
 INTEGRATION_TARGETS=(
     "$BIN_DIR/gekko-adb"
     "$DESKTOP_FILE"
+    "$LEGACY_DESKTOP_FILE"
     "$ICON_FILE"
     "$METAINFO_FILE"
 )
@@ -99,6 +101,20 @@ ok()    { echo -e "${GREEN}[✓]${RESET} $*"; }
 warn()  { echo -e "${YELLOW}[!]${RESET} $*"; }
 fail()  { echo -e "${RED}[✗]${RESET} $*" >&2; }
 
+# Avisa si ~/.local/bin no está en PATH (el launcher no se encontraría desde
+# la terminal). Solo informa: nunca modifica los archivos del shell.
+check_path() {
+    case ":$PATH:" in
+        *":$BIN_DIR:"*) ok "$BIN_DIR está en tu PATH." ;;
+        *)
+            warn "$BIN_DIR NO está en tu PATH: el comando 'gekko-adb' no se encontrará desde la terminal."
+            info "Añade esta línea a ~/.bashrc o ~/.zshrc y abre una terminal nueva:"
+            info "    export PATH=\"\$HOME/.local/bin:\$PATH\""
+            info "(en fish: fish_add_path ~/.local/bin)"
+            ;;
+    esac
+}
+
 usage() {
     cat <<EOF
 Gekko ADB Studio - instalador Arch/Garuda (pacman) y Solus (eopkg)
@@ -107,7 +123,7 @@ Uso: ./install.sh [opciones]
   o:  curl -fsSL https://raw.githubusercontent.com/The-Gekko/gekko-adb/main/install.sh | bash
 
 Opciones:
-  --check         Verificar el entorno sin escribir nada
+  --check         Verificar el entorno sin escribir nada (incompatible con --uninstall)
   --uninstall     Eliminar la app (conserva config y logs)
   --no-deps       No instalar dependencias con el gestor de paquetes (tampoco toca udev)
   --assume-yes    Confirmar la instalación de dependencias automáticamente
@@ -138,19 +154,16 @@ if [[ "$(id -u)" -eq 0 ]]; then
     exit 1
 fi
 
-if ! [[ -t 0 ]]; then
-    ASSUME_YES=true
-    warn "Entrada no interactiva (p. ej. curl | bash); se asume --assume-yes."
-fi
-
-if [[ "$DISTRO" == "unknown" ]]; then
-    warn "Distribución no reconocida; asumo Arch (pacman)."
-    DISTRO="arch"
+# --check nunca escribe ni borra nada: combinado con --uninstall se rechaza
+# en vez de arriesgarse a borrar la instalación en un "diagnóstico".
+if $CHECK_ONLY && $DO_UNINSTALL; then
+    fail "--check y --uninstall son incompatibles: --check nunca borra nada. Usa uno u otro."
+    exit 1
 fi
 
 # ------------------------------------------------------------- desinstalar
-# Va antes de cualquier comprobación de dependencias: desinstalar nunca debe
-# instalar paquetes ni pedir sudo.
+# Va antes de cualquier comprobación de dependencias o de distribución:
+# desinstalar nunca debe instalar paquetes ni pedir sudo.
 if $DO_UNINSTALL; then
     info "Desinstalando Gekko ADB Studio…"
     for target in "${INTEGRATION_TARGETS[@]}"; do
@@ -172,9 +185,31 @@ if $DO_UNINSTALL; then
     if [[ -d "$APP_DATA_ROOT" && -z "$(ls -A "$APP_DATA_ROOT" 2>/dev/null)" ]]; then
         rmdir "$APP_DATA_ROOT" 2>/dev/null || true
     fi
-    info "Config, logs y presets se conservan en $CONFIG_HOME/gekko-adb y $LOG_DIR."
+    info "Se conservan la configuración ($CONFIG_HOME/gekko-adb) y los logs ($LOG_DIR)."
+    info "Los presets de debloat viven dentro de la app y se eliminaron con ella."
     ok "Desinstalación completada."
     exit 0
+fi
+
+# Distribución no reconocida: se usa el gestor de paquetes que exista. Sin
+# pacman ni eopkg no se puede instalar dependencias: hay que hacerlo a mano
+# y ejecutar con --no-deps.
+HAVE_PKG_MANAGER=true
+if [[ "$DISTRO" == "unknown" ]]; then
+    if command -v pacman >/dev/null 2>&1; then
+        warn "Distribución no reconocida; hay pacman, asumo Arch."
+        DISTRO="arch"
+    elif command -v eopkg >/dev/null 2>&1; then
+        warn "Distribución no reconocida; hay eopkg, asumo Solus."
+        DISTRO="solus"
+    elif $INSTALL_DEPS && ! $CHECK_ONLY; then
+        fail "Distribución no reconocida y sin pacman ni eopkg: no puedo instalar dependencias."
+        fail "Instala a mano python3, python-gobject, GTK 3/4, android-tools, scrcpy, glib2, xdg-utils, xdg-user-dirs y vuelve a ejecutar con --no-deps."
+        exit 1
+    else
+        warn "Distribución no reconocida y sin pacman ni eopkg: no se comprobarán paquetes."
+        HAVE_PKG_MANAGER=false
+    fi
 fi
 
 check_package() {
@@ -199,32 +234,35 @@ install_deps() {
 # ------------------------------------------------------------- diagnóstico
 info "Comprobando entorno…"
 MISSING=()
-for pkg in "${REQUIRED_PACKAGES[@]}"; do
-    if ! check_package "$pkg"; then
-        MISSING+=("$pkg")
-    fi
-done
 OPT_PRESENT=()
-for pkg in "${OPTIONAL_PACKAGES[@]}"; do
-    if check_package "$pkg"; then
-        OPT_PRESENT+=("$pkg")
-    fi
-done
+if $HAVE_PKG_MANAGER; then
+    for pkg in "${REQUIRED_PACKAGES[@]}"; do
+        if ! check_package "$pkg"; then
+            MISSING+=("$pkg")
+        fi
+    done
+    for pkg in "${OPTIONAL_PACKAGES[@]}"; do
+        if check_package "$pkg"; then
+            OPT_PRESENT+=("$pkg")
+        fi
+    done
 
-if [[ ${#MISSING[@]} -eq 0 ]]; then
-    ok "Todas las dependencias requeridas están instaladas."
-else
-    warn "Faltan: ${MISSING[*]}"
-fi
-if [[ ${#OPT_PRESENT[@]} -gt 0 ]]; then
-    ok "Opcionales presentes: ${OPT_PRESENT[*]}"
-else
-    warn "Matugen no está instalado (el tema matugen se desactivará automáticamente)."
+    if [[ ${#MISSING[@]} -eq 0 ]]; then
+        ok "Todas las dependencias requeridas están instaladas."
+    else
+        warn "Faltan: ${MISSING[*]}"
+    fi
+    if [[ ${#OPT_PRESENT[@]} -gt 0 ]]; then
+        ok "Opcionales presentes: ${OPT_PRESENT[*]}"
+    else
+        warn "Matugen no está instalado (el tema matugen se desactivará automáticamente)."
+    fi
 fi
 
 if [[ -x "$BIN_DIR/gekko-adb" ]]; then
     ok "Launcher existente: $BIN_DIR/gekko-adb"
 fi
+check_path
 
 if [[ -f "$LEGACY_DESKTOP_FILE" ]]; then
     warn "Se reemplazará el launcher web legacy: $LEGACY_DESKTOP_FILE"
@@ -241,6 +279,11 @@ fi
 
 # ------------------------------------------------------------- dependencias
 if $INSTALL_DEPS && [[ ${#MISSING[@]} -gt 0 ]]; then
+    # Sin TTY (curl | bash) no se puede preguntar: se confirma automáticamente.
+    if ! $ASSUME_YES && ! [[ -t 0 ]]; then
+        ASSUME_YES=true
+        warn "Entrada no interactiva (p. ej. curl | bash); se asume --assume-yes para las dependencias."
+    fi
     if ! $ASSUME_YES; then
         read -r -p "¿Instalar dependencias con $([ "$DISTRO" == "solus" ] && echo eopkg || echo pacman)? [s/N] " resp
         if [[ "$resp" != "s" && "$resp" != "S" ]]; then
@@ -339,7 +382,8 @@ install_core() {
         cp "$SRC_DIR/$f" "$INSTALL_DIR/$f" || { fail "Falta $f en las fuentes."; return 1; }
     done
     cp "$SRC_DIR/bin/gekko-adb" "$INSTALL_DIR/bin/gekko-adb" || { fail "Falta bin/gekko-adb."; return 1; }
-    cp "$SRC_DIR/assets/gekko-adb.png" "$INSTALL_DIR/assets/gekko-adb.png" || { fail "Falta assets/gekko-adb.png."; return 1; }
+    # Solo el ícono de 512 px: assets/gekko-adb.png (8 MB) es material del
+    # repositorio y la app no lo usa.
     cp "$SRC_DIR/assets/gekko-adb-512.png" "$INSTALL_DIR/assets/gekko-adb-512.png" || { fail "Falta assets/gekko-adb-512.png."; return 1; }
     chmod +x "$INSTALL_DIR/bin/gekko-adb" "$INSTALL_DIR/install.sh" || return 1
     return 0
@@ -374,7 +418,7 @@ Comment=Master Suite de control ADB para Linux (GTK 3/4)
 Exec="$BIN_DIR/gekko-adb"
 Icon=gekko-adb
 Terminal=false
-Categories=Development;System;Utility;
+Categories=Development;Debugger;
 Keywords=ADB;Android;Debloat;Samsung;Xiaomi;Scrcpy;Gekko;
 StartupWMClass=com.gekko.adb
 EOF
@@ -406,8 +450,7 @@ cat > "$METAINFO_FILE" <<EOF
   <launchable type="desktop-id">com.gekko.adb.desktop</launchable>
   <categories>
     <category>Development</category>
-    <category>System</category>
-    <category>Utility</category>
+    <category>Debugger</category>
   </categories>
 </component>
 EOF
@@ -419,10 +462,9 @@ if [[ -f "$LEGACY_DESKTOP_FILE" ]]; then
     warn "Eliminado el launcher legacy (GekkoADB.desktop)."
 fi
 
-# Aislamiento de entorno para la app instalada (informativo; el launcher ya exporta la ruta)
-cat > "$ENV_FILE" <<EOF
-GEKKO_ADB_PROJECT_DIR="$INSTALL_DIR"
-EOF
+# Instalaciones anteriores escribían $ENV_FILE; nadie lo lee (el launcher
+# exporta GEKKO_ADB_PROJECT_DIR), así que ya no se crea y se limpia si existe.
+rm -f "$ENV_FILE"
 
 # Reglas udev para ADB (android-udev en Arch). Solo si se gestionan dependencias.
 if $INSTALL_DEPS && [[ -f /usr/lib/udev/rules.d/51-android.rules && -x /usr/bin/udevadm ]]; then
@@ -435,6 +477,7 @@ if $INSTALL_DEPS && [[ -f /usr/lib/udev/rules.d/51-android.rules && -x /usr/bin/
 fi
 
 ok "Instalación completada."
+check_path
 info "Inicia la app con: gekko-adb"
 info "Ruta de instalación: $INSTALL_DIR"
 info "Para desinstalar: $INSTALL_DIR/install.sh --uninstall"

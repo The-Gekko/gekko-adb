@@ -15,6 +15,7 @@ import re
 import shlex
 import shutil
 import subprocess
+import sys
 import threading
 import time
 from datetime import datetime
@@ -1857,9 +1858,9 @@ def diagnostics():
         rc = 1
     scrcpy_path = shutil.which(SCRCPY_EXEC)
     lines.append(f'Scrcpy: {scrcpy_path or "no instalado (opcional)"}')
-    gi = run(['python3', '-c', "import gi; gi.require_version('Gtk','4.0'); from gi.repository import Gtk; print('GTK4 ' + '.'.join(map(str,(Gtk.get_major_version(),Gtk.get_minor_version()))))"], timeout=30)
-    gi3 = run(['python3', '-c', "import gi; gi.require_version('Gtk','3.0'); from gi.repository import Gtk; print('GTK3 ' + '.'.join(map(str,(Gtk.get_major_version(),Gtk.get_minor_version()))))"], timeout=30)
-    lines.append('GTK: ' + ', '.join(x['stdout'] for x in (gi, gi3) if x['success']) or 'GTK: python-gobject/GTK no disponibles')
+    gi = run([sys.executable, '-c', "import gi; gi.require_version('Gtk','4.0'); from gi.repository import Gtk; print('GTK4 ' + '.'.join(map(str,(Gtk.get_major_version(),Gtk.get_minor_version()))))"], timeout=30)
+    gi3 = run([sys.executable, '-c', "import gi; gi.require_version('Gtk','3.0'); from gi.repository import Gtk; print('GTK3 ' + '.'.join(map(str,(Gtk.get_major_version(),Gtk.get_minor_version()))))"], timeout=30)
+    lines.append('GTK: ' + (', '.join(x['stdout'] for x in (gi, gi3) if x['success']) or 'python-gobject/GTK no disponibles'))
     if not gi['success'] and not gi3['success']:
         rc = 1
     if rc == 0:
@@ -1873,7 +1874,6 @@ def diagnostics():
 
 def main(argv=None):
     import argparse
-    import sys
     parser = argparse.ArgumentParser(prog='gekko-adb', description=f'{APP_NAME} (núcleo CLI)')
     parser.add_argument('--version', action='store_true', help='mostrar versión')
     parser.add_argument('--diagnostics', action='store_true', help='verificar dependencias y dispositivos')
@@ -1891,5 +1891,4 @@ def main(argv=None):
 
 
 if __name__ == '__main__':
-    import sys
     sys.exit(main())
