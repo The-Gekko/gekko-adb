@@ -2,7 +2,8 @@
 """Gekko ADB Studio - frontend GTK 3 (compatibilidad).
 
 API específica de GTK 3: pack_start/add/show_all, Gdk.Screen,
-StyleContext.add_provider_for_screen. No importar el frontend GTK 4 aquí.
+StyleContext.add_provider_for_screen, FileChooserNative con señal response.
+No importar el frontend GTK 4 aquí.
 """
 from gi import require_version
 require_version('Gtk', '3.0')
@@ -18,15 +19,27 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from gekko_adb_core import (
     APP_ID,
     APP_NAME,
+    APP_VERSION,
+    CatalogoError,
+    CommandWorker,
     cargar_config,
     guardar_config,
     load_catalogo,
     preset_buttons,
-    start_command,
+    validar_campos,
+    build_valores,
 )
 from gekko_adb_theme import THEMES, get_theme_css, get_monitor_path
 
 _PRIORITY = Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
+_REFRESH_AFTER = {
+    'role_set', 'pm_action', 'uninstall', 'restore', 'debloat_preset', 'restore_preset',
+    'reboot', 'soft_reboot', 'nav_mode', 'anim_scale', 'density', 'density_reset',
+    'wm_size', 'wm_size_reset', 'settings_put', 'settings_delete', 'rotation',
+    'connect', 'disconnect', 'tcpip', 'usb', 'start_server', 'pair', 'reconnect',
+    'wait_for_device', 'root', 'unroot', 'overlay_enable', 'overlay_disable',
+}
+_APK_KEYS = ('apk', 'apks', 'ota')
 
 
 def css(widget, *classes):
@@ -37,36 +50,71 @@ def css(widget, *classes):
 
 class GekkoAdbGtk3App(Gtk.Application):
     def __init__(self):
-        super().__init__(application_id=APP_ID)
+        # Id distinto al de GTK4 para que ambos frontends puedan coexistir.
+        super().__init__(application_id=APP_ID + '.gtk3')
         self.config = cargar_config()
-        self._catalogo = load_catalogo()
         self._theme = self.config.get('General', 'theme', fallback='system')
         self._provider = None
         self._monitor = None
         self._monitor_source = 0
         self._workers = set()
+        self._native_dialogs = set()
         self._dashboard_widgets = {}
         self._conn_pill_label = None
         self._conn_dot = None
-        self._debloat_specs = preset_buttons()
+        self._console_buf = None
+        self._console_view = None
+        self._end_mark = None
+        self._term_entry = None
+        self._refreshing = False
+        self._poll_paused = False
+        self._theme_warned = False
+        self._pending_logs = []
+        self._load_error = None
         self.win = None
+        try:
+            self._catalogo = load_catalogo()
+            self._debloat_specs = preset_buttons()
+        except CatalogoError as e:
+            self._load_error = str(e)
+            self._catalogo = {'categorias': []}
+            self._debloat_specs = []
 
     def do_activate(self):
         win = self.props.active_window
         if win:
             win.present()
             return
-        self.win = Gtk.ApplicationWindow(application=self)
-        self.win.set_title(APP_NAME)
-        self.win.set_default_size(1180, 760)
-        self.win.set_size_request(920, 600)
-        self._build_ui()
+        if self._load_error:
+            self._fatal(self._load_error)
+            return
+        try:
+            self.win = Gtk.ApplicationWindow(application=self)
+            self.win.set_title(APP_NAME)
+            self.win.set_default_size(1180, 760)
+            self.win.set_size_request(920, 600)
+            self._build_ui()
+        except Exception as e:
+            self._fatal(f'No se pudo construir la interfaz: {type(e).__name__}: {e}')
+            return
         self.win.show_all()
         self.win.present()
         self._apply_theme(self._theme)
         self._setup_theme_monitor()
         self._refresh_device()
         GLib.timeout_add_seconds(10, self._tick_refresh)
+
+    def _fatal(self, msg):
+        print(f'ERROR: {msg}', file=sys.stderr)
+        try:
+            dlg = Gtk.MessageDialog(modal=True, message_type=Gtk.MessageType.ERROR,
+                                    buttons=Gtk.ButtonsType.CLOSE, text=APP_NAME)
+            dlg.format_secondary_text(msg)
+            dlg.run()
+            dlg.destroy()
+        except Exception:
+            pass
+        self.quit()
 
     def do_shutdown(self):
         if self._monitor:
@@ -84,6 +132,9 @@ class GekkoAdbGtk3App(Gtk.Application):
         root.pack_start(self._build_body(), True, True, 0)
         root.pack_start(self._build_console(), False, False, 0)
         self.win.add(root)
+        for msg in self._pending_logs:
+            self._log(msg)
+        self._pending_logs = []
 
     def _build_header(self):
         bar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
@@ -108,8 +159,7 @@ class GekkoAdbGtk3App(Gtk.Application):
         refresh.connect('clicked', self._on_refresh)
         bar.pack_start(refresh, False, False, 0)
 
-        bar.pack_start(Gtk.Separator(orientation=Gtk.Orientation.VERTICAL),
-                       False, False, 0)
+        bar.pack_start(Gtk.Separator(orientation=Gtk.Orientation.VERTICAL), False, False, 0)
 
         bar.pack_start(Gtk.Label(label='Tema:'), False, False, 0)
         combo = Gtk.ComboBoxText()
@@ -121,6 +171,10 @@ class GekkoAdbGtk3App(Gtk.Application):
             combo.set_active(0)
         combo.connect('changed', self._on_theme_changed)
         bar.pack_start(combo, False, False, 0)
+
+        version = Gtk.Label(label=f'v{APP_VERSION}')
+        css(version, 'brand-sub')
+        bar.pack_end(version, False, False, 0)
         return bar
 
     def _build_body(self):
@@ -147,7 +201,6 @@ class GekkoAdbGtk3App(Gtk.Application):
         scroller.add(self._cat_list)
         scroller.set_vexpand(True)
         sidebar.pack_start(scroller, True, True, 0)
-
         body.pack_start(sidebar, False, False, 0)
 
         self._stack = Gtk.Stack()
@@ -155,20 +208,22 @@ class GekkoAdbGtk3App(Gtk.Application):
         self._stack.set_vexpand(True)
         body.pack_start(self._stack, True, True, 0)
 
-        for i, cat in enumerate(self._catalogo['categorias']):
+        for cat in self._catalogo['categorias']:
             row = Gtk.ListBoxRow()
-            label = Gtk.Label(label=f"{cat.get('icono', '•')}  {cat['titulo']}", xalign=0)
+            label = Gtk.Label(label=f"{cat.get('icono', '•')}  {cat.get('titulo') or cat.get('id', '?')}", xalign=0)
             css(label, 'gekko-cat')
             label.set_margin_top(4)
             label.set_margin_bottom(4)
             label.set_margin_start(6)
             label.set_margin_end(6)
             row.add(label)
-            row.cat_id = cat['id']
+            row.cat_id = cat.get('id', '')
             self._cat_list.add(row)
-            self._stack.add_named(self._build_page(cat), cat['id'])
+            self._stack.add_named(self._build_page(cat), cat.get('id', ''))
 
-        self._cat_list.select_row(self._cat_list.get_row_at_index(0))
+        first = self._cat_list.get_row_at_index(0)
+        if first is not None:
+            self._cat_list.select_row(first)
         return body
 
     def _build_page(self, cat):
@@ -178,7 +233,7 @@ class GekkoAdbGtk3App(Gtk.Application):
         page.set_margin_top(12)
         page.set_margin_bottom(12)
 
-        head = Gtk.Label(label=cat['titulo'], xalign=0)
+        head = Gtk.Label(label=cat.get('titulo') or cat.get('id', '?'), xalign=0)
         css(head, 'big-title')
         page.pack_start(head, False, False, 0)
         if cat.get('desc'):
@@ -192,7 +247,7 @@ class GekkoAdbGtk3App(Gtk.Application):
 
         if cat.get('especial') == 'dashboard':
             flow = self._build_dashboard()
-        elif cat['id'] == 'debloat':
+        elif cat.get('id') == 'debloat':
             flow = self._build_command_flow(self._debloat_specs)
         else:
             flow = self._build_command_flow(cat.get('comandos', []))
@@ -215,6 +270,7 @@ class GekkoAdbGtk3App(Gtk.Application):
             ('Pantalla / DPI', 'display'),
             ('Navegación', 'nav_mode'),
             ('Launcher HOME', 'home_role'),
+            ('SMS / Teléfono', 'sms_dialer'),
         ]
         for titulo, campo in campos:
             box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
@@ -246,7 +302,7 @@ class GekkoAdbGtk3App(Gtk.Application):
         card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
         css(card, 'gekko-card')
 
-        titulo = Gtk.Label(label=spec.get('titulo', spec['id']), xalign=0, wrap=True)
+        titulo = Gtk.Label(label=spec.get('titulo') or spec.get('id', '?'), xalign=0, wrap=True)
         css(titulo, 'card-title')
         card.pack_start(titulo, False, False, 0)
 
@@ -254,14 +310,19 @@ class GekkoAdbGtk3App(Gtk.Application):
         css(desc, 'card-desc')
         card.pack_start(desc, False, False, 0)
 
-        btn = Gtk.Button(label='▶  Ejecutar')
-        if spec.get('peligro'):
-            css(btn, 'peligro-btn')
-        elif spec.get('warn'):
-            css(btn, 'warn-btn')
-        else:
+        if spec.get('especial') == 'terminal':
+            btn = Gtk.Button(label='⌨  Ir a la consola')
             css(btn, 'cmd-btn')
-        btn.connect('clicked', self._on_command, spec)
+            btn.connect('clicked', self._on_focus_terminal)
+        else:
+            btn = Gtk.Button(label='▶  Ejecutar')
+            if spec.get('peligro'):
+                css(btn, 'peligro-btn')
+            elif spec.get('warn'):
+                css(btn, 'warn-btn')
+            else:
+                css(btn, 'cmd-btn')
+            btn.connect('clicked', self._on_command, spec)
         card.pack_start(btn, False, False, 0)
         return card
 
@@ -284,7 +345,6 @@ class GekkoAdbGtk3App(Gtk.Application):
         head.pack_start(clear, False, False, 0)
         box.pack_start(head, False, False, 0)
 
-        self._console_buf = None
         scroll = Gtk.ScrolledWindow()
         scroll.set_vexpand(True)
         scroll.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
@@ -293,8 +353,10 @@ class GekkoAdbGtk3App(Gtk.Application):
         text.set_cursor_visible(False)
         text.set_wrap_mode(Gtk.WrapMode.WORD_CHAR)
         css(text, 'console-view')
+        self._console_view = text
         self._console_buf = text.get_buffer()
         self._console_buf.set_text('Gekko ADB Studio iniciado. Sistema listo.')
+        self._end_mark = self._console_buf.create_mark('gekko-end', self._console_buf.get_end_iter(), False)
         scroll.add(text)
         box.pack_start(scroll, True, True, 0)
 
@@ -304,7 +366,7 @@ class GekkoAdbGtk3App(Gtk.Application):
         self._term_entry = Gtk.Entry()
         self._term_entry.set_hexpand(True)
         self._term_entry.set_placeholder_text(
-            'shell getprop ro.product.model · también: devices, push, install…')
+            'shell getprop ro.product.model · también: devices, pull, install… (acepta comillas)')
         self._term_entry.connect('activate', self._on_terminal_exec)
         run_btn = Gtk.Button(label='Ejecutar')
         css(run_btn, 'cmd-btn')
@@ -319,21 +381,29 @@ class GekkoAdbGtk3App(Gtk.Application):
     def _on_category_selected(self, listbox, row):
         if row is None:
             return
-        cat_id = row.cat_id
+        cat_id = getattr(row, 'cat_id', '')
         if cat_id:
             self._stack.set_visible_child_name(cat_id)
 
     def _on_refresh(self, _btn):
+        self._poll_paused = False
         self._log('Refrescando estado del dispositivo…')
         self._refresh_device()
 
+    def _on_focus_terminal(self, _btn):
+        if self._term_entry is not None:
+            self._term_entry.grab_focus()
+
     def _on_theme_changed(self, combo):
         idx = combo.get_active()
-        if idx < 0:
+        if idx < 0 or idx >= len(THEMES):
             return
         self._theme = list(THEMES)[idx]
         self.config.set('General', 'theme', self._theme)
-        guardar_config(self.config)
+        err = guardar_config(self.config)
+        if err:
+            self._log(f'No se pudo guardar la configuración: {err}')
+        self._theme_warned = False
         self._apply_theme(self._theme)
         self._setup_theme_monitor()
 
@@ -345,98 +415,115 @@ class GekkoAdbGtk3App(Gtk.Application):
         if not cmd:
             return
         self._log(f'Terminal: adb > {cmd}')
-        spec = {'id': 'terminal', 'titulo': 'Terminal', 'desc': '',
-                'accion': 'terminal'}
+        spec = {'id': 'terminal', 'titulo': 'Consola', 'desc': '', 'accion': 'terminal'}
         self._run_spec(spec, {'command': cmd})
         self._term_entry.set_text('')
 
     # ------------------------------------------------------------- running
     def _log(self, msg, kind='info'):
         if self._console_buf is None:
+            self._pending_logs.append(msg)
             return
-        end = self._console_buf.get_end_iter()
-        self._console_buf.insert(end,
-                                 f'\n[{datetime.datetime.now().strftime("%H:%M:%S")}] {msg}')
+        stamp = datetime.datetime.now().strftime('%H:%M:%S')
+        prefix = '⚠ ' if kind == 'error' else ''
+        self._console_buf.insert(self._console_buf.get_end_iter(), f'\n[{stamp}] {prefix}{msg}')
+        try:
+            self._console_buf.move_mark(self._end_mark, self._console_buf.get_end_iter())
+            self._console_view.scroll_mark_onscreen(self._end_mark)
+        except Exception:
+            pass
 
     def _run_spec(self, spec, valores=None, flags=None):
         if spec.get('confirmar'):
             self._confirm_dialog(spec, valores, flags)
             return
-        self._log(f"Ejecutando: {spec.get('titulo', spec.get('id', ''))}")
+        self._launch(spec, valores, flags)
+
+    def _launch(self, spec, valores=None, flags=None):
+        self._log(f"Ejecutando: {spec.get('titulo') or spec.get('id', '')}")
 
         def _on_done(result):
             GLib.idle_add(self._on_worker_done, spec, result, worker)
-            return None
 
         def _on_error(err):
             GLib.idle_add(self._on_worker_error, spec, err, worker)
-            return None
 
-        worker = start_command(spec, valores, flags, on_done=_on_done, on_error=_on_error)
+        worker = CommandWorker(spec, valores, flags, on_done=_on_done, on_error=_on_error)
         self._workers.add(worker)
+        worker.start()
+        return worker
 
     def _on_worker_done(self, spec, result, worker):
         self._workers.discard(worker)
         out = result.get('stdout', '')
         err = result.get('stderr', '')
         extra = result.get('path', '')
+        titulo = spec.get('titulo') or spec.get('id', '')
         if result.get('success'):
-            self._log(f"✔ {spec.get('titulo', spec.get('id', ''))} — OK")
+            self._log(f"✔ {titulo} — OK")
         else:
-            self._log(f"✘ {spec.get('titulo', spec.get('id', ''))} — ERROR")
+            self._log(f"✘ {titulo} — ERROR")
         if out:
             self._log(out)
         if err:
             self._log(err, kind='error')
-        if extra:
+        if extra and result.get('success'):
             self._log(f'Archivo: {extra}')
-        if spec.get('accion') in ('quick_pull', 'pull', 'install', 'install_multiple',
-                                  'settings_put', 'nav_mode', 'anim_scale', 'density',
-                                  'density_reset', 'wm_size', 'wm_size_reset'):
+        accion = spec.get('accion')
+        if accion == 'kill_server' and result.get('success'):
+            self._poll_paused = True
+            self._log('Sondeo del dispositivo pausado (pulsa "Refrescar ADB" o "Iniciar servidor" para reanudar).')
+        elif accion in _REFRESH_AFTER:
+            self._poll_paused = False
             self._refresh_device()
         return False
 
     def _on_worker_error(self, spec, error, worker):
         self._workers.discard(worker)
-        self._log(f'✘ {spec.get("titulo", spec.get("id", ""))}: {error}')
+        self._log(f'✘ {spec.get("titulo") or spec.get("id", "")}: {error}', kind='error')
         return False
 
     def _confirm_dialog(self, spec, valores, flags):
-        dialog = Gtk.Dialog(title=f"¿Confirmar {spec.get('titulo', '')}?",
-                            transient_for=self.win)
+        dialog = Gtk.Dialog(title=f"¿Confirmar {spec.get('titulo', '')}?", transient_for=self.win)
         dialog.set_modal(True)
-        label = Gtk.Label(
-            label=f"Esta acción puede ser destructiva:\n\n{spec.get('desc', '')}\n\n"
-                  f"¿Seguro que deseas continuar?")
+        texto = f"Esta acción puede ser destructiva:\n\n{spec.get('desc', '')}"
+        if spec.get('advertencia'):
+            texto += f"\n\n⚠ {spec['advertencia']}"
+        texto += "\n\n¿Seguro que deseas continuar?"
+        label = Gtk.Label(label=texto)
         label.set_line_wrap(True)
+        label.set_max_width_chars(60)
         label.set_margin_top(16)
         label.set_margin_bottom(16)
         label.set_margin_start(16)
         label.set_margin_end(16)
-        content = dialog.get_content_area()
-        content.add(label)
+        dialog.get_content_area().add(label)
         dialog.add_button('Cancelar', Gtk.ResponseType.CANCEL)
         dialog.add_button('Ejecutar', Gtk.ResponseType.OK)
         dialog.connect('response', self._on_confirm_response, spec, valores, flags)
         dialog.show_all()
         dialog.present()
+        return dialog
 
     def _on_confirm_response(self, dialog, response, spec, valores, flags):
-        if response == Gtk.ResponseType.OK:
-            self._run_spec(spec, valores, flags)
         dialog.destroy()
+        if response == Gtk.ResponseType.OK:
+            self._launch(spec, valores, flags)
+        else:
+            self._log(f"Cancelado: {spec.get('titulo') or spec.get('id', '')}")
 
     def _on_command(self, _btn, spec):
-        campos = spec.get('campos') or []
-        if not campos:
+        if spec.get('especial') == 'terminal':
+            self._on_focus_terminal(None)
+            return
+        if not (spec.get('campos') or []):
             self._run_spec(spec)
             return
         self._campos_dialog(spec)
 
     def _campos_dialog(self, spec):
         campos = spec.get('campos') or []
-        dialog = Gtk.Dialog(title=spec.get('titulo', 'Argumentos'),
-                            transient_for=self.win)
+        dialog = Gtk.Dialog(title=spec.get('titulo', 'Argumentos'), transient_for=self.win)
         dialog.set_modal(True)
         content = dialog.get_content_area()
         grid = Gtk.Grid()
@@ -451,9 +538,10 @@ class GekkoAdbGtk3App(Gtk.Application):
         row = 0
         for campo in campos:
             key = campo['clave']
-            label = Gtk.Label(label=f"{campo['etiqueta']}:", xalign=0)
+            etiqueta = campo.get('etiqueta', key) + ('' if campo.get('opcional') else ' *')
+            label = Gtk.Label(label=f"{etiqueta}:", xalign=0)
             grid.attach(label, 0, row, 1, 1)
-            w = self._build_campo_widget(campo, dialog, widgets)
+            w = self._build_campo_widget(campo, dialog)
             grid.attach(w, 1, row, 1, 1)
             widgets[key] = w
             row += 1
@@ -463,21 +551,27 @@ class GekkoAdbGtk3App(Gtk.Application):
             checks.append((opt, chk))
             grid.attach(chk, 1, row, 1, 1)
             row += 1
+        error_label = Gtk.Label(label='', xalign=0)
+        error_label.set_line_wrap(True)
+        css(error_label, 'error-text')
+        grid.attach(error_label, 0, row, 2, 1)
         content.add(grid)
         dialog.add_button('Cancelar', Gtk.ResponseType.CANCEL)
         dialog.add_button('Ejecutar', Gtk.ResponseType.OK)
-        dialog.connect('response', self._on_campos_response, spec, widgets, checks)
+        dialog.connect('response', self._on_campos_response, spec, widgets, checks, error_label)
         dialog.show_all()
         dialog.present()
+        return dialog
 
-    def _build_campo_widget(self, campo, dialog, widgets):
+    def _build_campo_widget(self, campo, dialog):
         tipo = campo.get('tipo', 'texto')
         defecto = str(campo.get('defecto', ''))
+        key = campo.get('clave', '')
         if tipo == 'select':
             combo = Gtk.ComboBoxText()
             for i, op in enumerate(campo.get('opciones') or []):
                 combo.append(op['valor'], op['etiqueta'])
-                if op.get('valor') == defecto or (defecto == '' and i == 0):
+                if op.get('valor') == defecto:
                     combo.set_active(i)
             if combo.get_active() < 0 and combo.get_model():
                 combo.set_active(0)
@@ -489,12 +583,14 @@ class GekkoAdbGtk3App(Gtk.Application):
             entry.set_hexpand(True)
             btn = Gtk.Button(label='Buscar…')
             css(btn, 'cmd-btn')
-            btn.connect('clicked', self._on_file_pick, entry, tipo, dialog)
+            btn.connect('clicked', self._on_file_pick, entry, tipo, key, dialog)
             box.pack_start(entry, True, True, 0)
             box.pack_start(btn, False, False, 0)
             return box
         entry = Gtk.Entry()
         entry.set_text(defecto)
+        if tipo == 'numero':
+            entry.set_input_purpose(Gtk.InputPurpose.DIGITS)
         if tipo == 'paquete':
             btn = Gtk.Button(label='Lista…')
             css(btn, 'cmd-btn')
@@ -505,45 +601,72 @@ class GekkoAdbGtk3App(Gtk.Application):
             return box
         return entry
 
-    def _on_file_pick(self, _btn, entry, tipo, dialog):
-        native = Gtk.FileChooserNative(title='Seleccionar',
-                                       transient_for=dialog,
-                                       action=Gtk.FileChooserAction.OPEN)
-        if tipo == 'carpeta':
-            native.set_action(Gtk.FileChooserAction.SELECT_FOLDER)
+    def _on_file_pick(self, _btn, entry, tipo, key, dialog):
+        action = Gtk.FileChooserAction.SELECT_FOLDER if tipo == 'carpeta' else Gtk.FileChooserAction.OPEN
+        native = Gtk.FileChooserNative(title='Seleccionar', transient_for=dialog, action=action)
         if tipo == 'archivos':
             native.set_select_multiple(True)
+        if tipo in ('archivo', 'archivos') and key in _APK_KEYS:
+            apk = Gtk.FileFilter()
+            apk.set_name('APK / OTA')
+            for pat in ('*.apk', '*.zip', '*.ota', '*.apks'):
+                apk.add_pattern(pat)
+            allf = Gtk.FileFilter()
+            allf.set_name('Todos los archivos')
+            allf.add_pattern('*')
+            native.add_filter(apk)
+            native.add_filter(allf)
+        # NativeDialog.run() exige que el diálogo no esté visible; se usa la
+        # señal response y show(), guardando la referencia para que viva.
+        self._native_dialogs.add(native)
         native.connect('response', self._on_file_pick_response, entry, tipo)
         native.show()
-        native.run()
-        native.destroy()
 
     def _on_file_pick_response(self, native, response, entry, tipo):
+        self._native_dialogs.discard(native)
         if response == Gtk.ResponseType.ACCEPT:
             if tipo == 'archivos':
                 paths = [f.get_path() for f in native.get_files()]
-                entry.set_text('\n'.join(paths))
+                paths = [p for p in paths if p]
+                if paths:
+                    entry.set_text('\n'.join(paths))
+                else:
+                    self._log('Solo se admiten archivos locales', kind='error')
             else:
-                entry.set_text(native.get_file().get_path())
+                f = native.get_file()
+                p = f.get_path() if f is not None else None
+                if p:
+                    entry.set_text(p)
+                else:
+                    self._log('Solo se admiten archivos locales', kind='error')
+        native.destroy()
 
-    def _on_package_pick(self, _btn, entry, dialog):
+    def _on_package_pick(self, btn, entry, dialog):
         self._log('Cargando lista de paquetes…')
+        btn.set_sensitive(False)
 
         def _on_done(result):
-            GLib.idle_add(self._show_package_dialog, entry, result)
-            return None
+            GLib.idle_add(self._show_package_dialog, entry, result, btn)
 
         def _on_error(err):
-            GLib.idle_add(self._log, f'Error cargando paquetes: {err}')
-            return None
+            GLib.idle_add(self._log, f'Error cargando paquetes: {err}', 'error')
+            GLib.idle_add(btn.set_sensitive, True)
 
-        worker = start_command(
-            {'id': 'pkg', 'titulo': 'paquetes', 'desc': '', 'accion': 'list_packages'},
-            None, None, on_done=_on_done, on_error=_on_error)
+        worker = CommandWorker({'id': 'pkg', 'titulo': 'paquetes', 'desc': '', 'accion': 'list_packages'},
+                               {'filtro': '-u'}, None, on_done=_on_done, on_error=_on_error)
         self._workers.add(worker)
+        worker.start()
 
-    def _show_package_dialog(self, entry, result):
-        pkgs = result.get('stdout', '').splitlines()
+    def _show_package_dialog(self, entry, result, btn=None):
+        if btn is not None:
+            btn.set_sensitive(True)
+        pkgs = result.get('packages') or []
+        if not result.get('success'):
+            self._log(f"No se pudo listar paquetes: {result.get('stderr') or result.get('stdout')}", kind='error')
+            return False
+        if not pkgs:
+            self._log('El dispositivo no devolvió paquetes.', kind='error')
+            return False
         dialog = Gtk.Dialog(title='Seleccionar paquete', transient_for=self.win)
         dialog.set_modal(True)
         dialog.set_default_size(520, 480)
@@ -559,14 +682,13 @@ class GekkoAdbGtk3App(Gtk.Application):
         scroll = Gtk.ScrolledWindow()
         scroll.set_vexpand(True)
         lst = Gtk.ListBox()
-        self._pkg_items = []
+        rows = []
         for p in pkgs:
             r = Gtk.ListBoxRow()
-            lbl = Gtk.Label(label=p, xalign=0)
-            r.add(lbl)
+            r.add(Gtk.Label(label=p, xalign=0))
             lst.add(r)
-            self._pkg_items.append(r)
-        search.connect('search-changed', self._filter_packages, lst)
+            rows.append(r)
+        search.connect('search-changed', self._filter_packages, rows)
         lst.connect('row-activated', self._on_pkg_selected, entry, dialog)
         scroll.add(lst)
         box.pack_start(scroll, True, True, 0)
@@ -575,43 +697,58 @@ class GekkoAdbGtk3App(Gtk.Application):
         dialog.connect('response', lambda d, r: d.destroy())
         dialog.show_all()
         dialog.present()
+        return False
 
-    def _filter_packages(self, search, lst):
+    def _filter_packages(self, search, rows):
         query = search.get_text().lower()
-        for row in self._pkg_items:
-            lbl = row.get_child()
-            row.set_visible(not query or query in lbl.get_text().lower())
+        for row in rows:
+            visible = not query or query in row.get_child().get_text().lower()
+            row.set_visible(visible)
+            row.set_no_show_all(not visible)
 
     def _on_pkg_selected(self, _lst, row, entry, dialog):
-        lbl = row.get_child()
-        entry.set_text(lbl.get_text())
+        entry.set_text(row.get_child().get_text())
         dialog.destroy()
 
-    def _on_campos_response(self, dialog, response, spec, widgets, checks):
-        if response == Gtk.ResponseType.OK:
-            valores = {}
-            for key, w in widgets.items():
-                if isinstance(w, Gtk.ComboBoxText):
-                    valores[key] = w.get_active_id() or ''
-                elif isinstance(w, Gtk.Box):
-                    entry = w.get_children()[0]
-                    valores[key] = entry.get_text().strip()
-                else:
-                    valores[key] = w.get_text().strip()
-            flags = [opt['flag'] for opt, chk in checks if chk.get_active()]
-            self._run_spec(spec, valores, flags)
+    def _widget_value(self, w):
+        if isinstance(w, Gtk.ComboBoxText):
+            return w.get_active_id() or ''
+        if isinstance(w, Gtk.Box):
+            return w.get_children()[0].get_text().strip()
+        return w.get_text().strip()
+
+    def _on_campos_response(self, dialog, response, spec, widgets, checks, error_label=None):
+        if response != Gtk.ResponseType.OK:
+            dialog.destroy()
+            return
+        valores = {key: self._widget_value(w) for key, w in widgets.items()}
+        flags = [opt['flag'] for opt, chk in checks if chk.get_active()]
+        errores = validar_campos(spec, build_valores(spec, valores, flags))
+        if errores:
+            if error_label is not None:
+                error_label.set_text('\n'.join(errores))
+            self._log('\n'.join(errores), kind='error')
+            return
         dialog.destroy()
+        self._run_spec(spec, valores, flags)
 
     # ------------------------------------------------------------ device info
     def _refresh_device(self):
-        def done(info):
+        if self._refreshing:
+            return
+        self._refreshing = True
+
+        def done(result):
+            self._refreshing = False
+            info = result.get('info') or {'connected': False, 'message': result.get('stderr', '')}
+            upd = self._dashboard_widgets
+            ctx = self._conn_dot.get_style_context()
             if info.get('connected'):
-                css(self._conn_dot, 'status-dot', 'conn')
-                self._conn_dot.get_style_context().remove_class('disc')
+                ctx.add_class('conn')
+                ctx.remove_class('disc')
                 self._conn_pill_label.set_text(
                     f"{info['model']} ({info['serial']})  ·  {info['battery']} "
                     f"·  {info['display']} @ {info['density']}")
-                upd = self._dashboard_widgets
                 upd['model'].set_text(info['model'])
                 upd['android'].set_text(f"{info['android']} [{info['abi']}]")
                 upd['battery'].set_text(f"{info['battery']} | {info['temperature']} "
@@ -620,39 +757,35 @@ class GekkoAdbGtk3App(Gtk.Application):
                 upd['display'].set_text(f"{info['display']} @ {info['density']}")
                 upd['nav_mode'].set_text(info['nav_mode'])
                 upd['home_role'].set_text(info['home_role'] or 'No asignado')
+                if 'sms_dialer' in upd:
+                    upd['sms_dialer'].set_text(f"{info.get('sms_role') or '—'} / {info.get('dialer_role') or '—'}")
             else:
-                css(self._conn_dot, 'status-dot', 'disc')
-                self._conn_dot.get_style_context().remove_class('conn')
-                self._conn_pill_label.set_text('Sin dispositivo · esperando ADB')
-                for w in self._dashboard_widgets.values():
+                ctx.add_class('disc')
+                ctx.remove_class('conn')
+                msg = info.get('message') or 'Sin dispositivo · esperando ADB'
+                self._conn_pill_label.set_text(msg if info.get('serial') else 'Sin dispositivo · esperando ADB')
+                for w in upd.values():
                     w.set_text('N/A')
+                if info.get('serial'):
+                    upd['model'].set_text(msg)
             return False
 
         def _on_done(result):
-            GLib.idle_add(done, self._info_from_result(result))
-            return None
+            GLib.idle_add(done, result)
+            GLib.idle_add(self._workers.discard, worker)
 
         def _on_error(err):
-            GLib.idle_add(done, {'connected': False})
-            return None
+            GLib.idle_add(done, {'success': False, 'stderr': str(err)})
+            GLib.idle_add(self._workers.discard, worker)
 
-        worker = start_command(
-            {'id': 'info', 'titulo': 'info', 'desc': '', 'accion': 'device_info'},
-            None, None, on_done=_on_done, on_error=_on_error)
+        worker = CommandWorker({'id': 'info', 'titulo': 'info', 'desc': '', 'accion': 'device_info'},
+                               None, None, on_done=_on_done, on_error=_on_error)
         self._workers.add(worker)
-
-    def _info_from_result(self, result):
-        if not result.get('success'):
-            return {'connected': False}
-        info = {'connected': True, 'serial': ''}
-        for line in result['stdout'].splitlines():
-            if ': ' in line:
-                k, v = line.split(': ', 1)
-                info[k.strip()] = v.strip()
-        return info
+        worker.start()
 
     def _tick_refresh(self):
-        self._refresh_device()
+        if not self._poll_paused:
+            self._refresh_device()
         return True
 
     # ----------------------------------------------------------------- theme
@@ -660,14 +793,12 @@ class GekkoAdbGtk3App(Gtk.Application):
         screen = Gdk.Screen.get_default()
         if screen is None:
             return
-        css_text, _fuente, resolved = get_theme_css(theme)
+        css_text, modo, fuente = get_theme_css(theme)
         provider = Gtk.CssProvider()
         try:
-            if hasattr(provider, 'load_from_data'):
-                provider.load_from_data(css_text.encode())
-            else:
-                provider.load_from_string(css_text)
-        except Exception:
+            provider.load_from_data(css_text.encode())
+        except Exception as e:
+            self._log(f'CSS del tema no válido: {e}', kind='error')
             return
         if self._provider:
             try:
@@ -678,9 +809,11 @@ class GekkoAdbGtk3App(Gtk.Application):
         self._provider = provider
         settings = Gtk.Settings.get_default()
         if settings is not None:
-            settings.set_property('gtk-application-prefer-dark-theme',
-                                  not (theme == 'light' or
-                                       (theme == 'system' and resolved == 'light')))
+            settings.set_property('gtk-application-prefer-dark-theme', modo == 'dark')
+        if fuente in ('matugen:nodisponible', 'matugen:sincolores') and not self._theme_warned:
+            self._theme_warned = True
+            self._log('Tema matugen: no hay CSS generado con colores reconocibles; se usa la paleta oscura '
+                      'hasta que aparezca ~/.config/gekko-adb/matugen.css o ~/.cache/matugen/colors-gtk.css.')
 
     def _setup_theme_monitor(self):
         if self._monitor:
@@ -709,14 +842,15 @@ class GekkoAdbGtk3App(Gtk.Application):
 
     def _matugen_reload(self):
         self._monitor_source = 0
+        self._theme_warned = False
         self._apply_theme(self._theme)
         return False
 
 
 def main():
     app = GekkoAdbGtk3App()
-    app.run(sys.argv)
+    return app.run(sys.argv)
 
 
 if __name__ == '__main__':
-    main()
+    sys.exit(main())

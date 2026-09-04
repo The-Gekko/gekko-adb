@@ -259,6 +259,11 @@ scrolledwindow {{
 textview.console-view text {{
     background-color: @bg;
 }}
+
+.error-text {{
+    color: @error;
+    font-size: 12px;
+}}
 """
 
 
@@ -292,41 +297,98 @@ def get_matugen_status():
     return status
 
 
+_DEFINE_RE = re.compile(r'\s*@define-color\s+([\w-]+)\s+(#[0-9a-fA-F]{3,8})')
+_VAR_RE = re.compile(r'\s*--([\w-]+)\s*:\s*(#[0-9a-fA-F]{3,8})')
+
+
 def _parse_matugen_colors(path):
+    """Colores de un CSS de matugen: @define-color o variables --nombre.
+
+    Se ignoran los bloques @media (p. ej. prefers-color-scheme: light) para
+    que no pisen la paleta principal, y gana la primera definición.
+    """
     colors = {}
     if not path:
         return colors
     try:
-        for line in path.read_text(encoding='utf-8').splitlines():
-            m = re.match(r'\s*@define-color\s+([\w-]+)\s+(#[0-9a-fA-F]{3,8})', line)
-            if m:
-                colors[m.group(1).lower()] = m.group(2)
+        depth = 0
+        in_media = False
+        media_depth = 0
+        for line in Path(path).read_text(encoding='utf-8').splitlines():
+            stripped = line.strip()
+            if stripped.startswith('@media'):
+                in_media = True
+                media_depth = depth
+            m = _DEFINE_RE.match(line) or _VAR_RE.match(line)
+            if m and not in_media:
+                colors.setdefault(m.group(1).lower().replace('-', '_'), m.group(2))
+            depth += line.count('{') - line.count('}')
+            if in_media and depth <= media_depth:
+                in_media = False
     except Exception:
         pass
     return colors
 
 
 def _system_prefers_dark():
+    """True si el escritorio prefiere oscuro. Sin gsettings, se asume oscuro."""
     try:
         res = subprocess.run(['gsettings', 'get', 'org.gnome.desktop.interface',
-                              'color-scheme'], capture_output=True, text=True, timeout=10)
-        if 'dark' in res.stdout.lower():
-            return True
+                              'color-scheme'], capture_output=True, text=True, timeout=10,
+                             stdin=subprocess.DEVNULL)
+        if res.returncode == 0 and res.stdout.strip():
+            return 'dark' in res.stdout.lower()
     except Exception:
         pass
+    gtk_theme = os.environ.get('GTK_THEME', '')
+    if gtk_theme:
+        return 'dark' in gtk_theme.lower()
     return True
+
+
+def _luminance(hex_color):
+    h = hex_color.lstrip('#')
+    if len(h) in (3, 4):
+        h = ''.join(c * 2 for c in h[:3])
+    try:
+        r, g, b = (int(h[i:i + 2], 16) for i in (0, 2, 4))
+    except ValueError:
+        return 0.0
+    return (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255.0
 
 
 def _render(palette):
     return _CSS_TEMPLATE.format(**palette)
 
 
-def get_theme_css(theme):
-    """Devuelve (css, fuente, resuelto).
+# Nombres Material (colors.css estándar de matugen) primero; después los
+# de tipo GTK/libadwaita (window_bg_color, accent_color...) y los de otros
+# templates (base, surface0...).
+_MATUGEN_MAP = {
+    'bg': ['background', 'surface', 'base', 'bg0_hard', 'bg', 'window_bg_color', 'theme_bg_color', 'view_bg_color'],
+    'sidebar': ['surface_container_low', 'surface_dim', 'surface0', 'base', 'bg0', 'sidebar_bg_color', 'window_bg_color'],
+    'card': ['surface_container', 'surface_container_high', 'surface1', 'surface0', 'card_bg_color', 'popover_bg_color', 'dialog_bg_color'],
+    'hover': ['surface_container_high', 'surface_container_highest', 'surface2', 'surface1', 'popover_bg_color', 'headerbar_bg_color'],
+    'pressed': ['surface_container_highest', 'surface_bright', 'surface3', 'surface2', 'headerbar_bg_color', 'card_bg_color'],
+    'text': ['on_background', 'on_surface', 'on_base', 'text', 'foreground', 'window_fg_color', 'theme_fg_color', 'view_fg_color'],
+    'sub': ['on_surface_variant', 'outline', 'surface2', 'sidebar_fg_color', 'headerbar_fg_color'],
+    'primary': ['primary', 'accent', 'green', 'accent_color', 'accent_bg_color', 'theme_selected_bg_color'],
+    'on_primary': ['on_primary', 'on_accent', 'accent_fg_color'],
+    'warn': ['warning', 'tertiary', 'orange', 'warn'],
+    'error': ['error', 'red', 'destructive_color', 'destructive_bg_color'],
+    'blue': ['secondary', 'blue'],
+    'border': ['outline_variant', 'outline', 'surface2', 'surface1', 'sidebar_backdrop_color', 'card_bg_color'],
+}
 
-    - system: dark/light según color-scheme del escritorio.
-    - matugen: usa el CSS generado; si falta, cae a dark con
-      resuelto='matugen:nodisponible' (la UI puede avisar).
+
+def get_theme_css(theme):
+    """Devuelve (css, modo, fuente).
+
+    - modo: 'light' o 'dark', la paleta realmente aplicada (para
+      gtk-application-prefer-dark-theme).
+    - fuente: de dónde salió: 'light', 'dark', 'system', 'matugen:<ruta>',
+      'matugen:nodisponible' (sin CSS) o 'matugen:sincolores' (CSS sin
+      colores reconocibles); la UI puede avisar.
     """
     if theme == 'light':
         return _render(_LIGHT), 'light', 'light'
@@ -339,37 +401,32 @@ def get_theme_css(theme):
     if theme == 'matugen':
         css_path = find_matugen_css()
         if css_path is None:
-            return _render(_DARK), None, 'matugen:nodisponible'
+            return _render(_DARK), 'dark', 'matugen:nodisponible'
         colors = _parse_matugen_colors(css_path)
-        palette = dict(_DARK)
-        # Nombres Material/material-you primero; si el template es de tipo GTK
-        # (theme_bg_color, accent_color...), se usan esos al final de cada lista.
-        mapa = {
-            'bg': ['base', 'bg0_hard', 'bg', 'window_bg_color', 'theme_bg_color'],
-            'sidebar': ['surface0', 'base', 'bg0', 'sidebar_bg_color', 'window_bg_color'],
-            'card': ['surface1', 'surface0', 'surface', 'card_bg_color', 'popover_bg_color', 'dialog_bg_color'],
-            'hover': ['surface2', 'surface1', 'popover_bg_color', 'headerbar_bg_color'],
-            'pressed': ['surface3', 'surface2', 'headerbar_bg_color', 'card_bg_color'],
-            'text': ['on_base', 'text', 'foreground', 'window_fg_color', 'theme_fg_color', 'view_fg_color'],
-            'sub': ['on_surface_variant', 'surface2', 'text', 'sidebar_fg_color', 'headerbar_fg_color'],
-            'primary': ['primary', 'accent', 'green', 'accent_color', 'accent_bg_color', 'theme_selected_bg_color'],
-            'on_primary': ['on_primary', 'on_accent', 'accent_fg_color'],
-            'warn': ['warning', 'orange', 'warn'],
-            'error': ['error', 'red', 'destructive_color', 'destructive_bg_color'],
-            'blue': ['secondary', 'blue'],
-            'border': ['surface2', 'surface1', 'sidebar_backdrop_color', 'card_bg_color'],
-        }
-        for clave, candidatos in mapa.items():
+        if not colors:
+            return _render(_DARK), 'dark', 'matugen:sincolores'
+        bg = None
+        for cand in _MATUGEN_MAP['bg']:
+            if cand in colors:
+                bg = colors[cand]
+                break
+        modo = 'light' if bg and _luminance(bg) > 0.5 else 'dark'
+        palette = dict(_LIGHT if modo == 'light' else _DARK)
+        for clave, candidatos in _MATUGEN_MAP.items():
             for cand in candidatos:
                 if cand in colors:
                     palette[clave] = colors[cand]
                     break
-        return _render(palette), str(css_path), 'matugen'
+        return _render(palette), modo, f'matugen:{css_path}'
     return _render(_DARK), 'dark', 'dark'
 
 
 def get_monitor_path(theme):
-    """Ruta a vigilar con Gio.FileMonitor (solo matugen)."""
+    """Ruta a vigilar con Gio.FileMonitor (solo matugen).
+
+    Si aún no existe ningún CSS se devuelve el primer candidato para que el
+    monitor detecte su creación.
+    """
     if theme == 'matugen':
-        return find_matugen_css()
+        return find_matugen_css() or matugen_css_candidates()[0]
     return None

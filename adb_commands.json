@@ -1,5 +1,5 @@
 {
-  "version": 2,
+  "version": 3,
   "categorias": [
     {
       "id": "dashboard",
@@ -14,39 +14,44 @@
       "icono": "🖥️",
       "desc": "Estado del servidor ADB local y descubrimiento de dispositivos.",
       "comandos": [
-        {"id": "devices", "titulo": "Listar dispositivos", "desc": "adb devices -l (detalle de cada conexión)", "accion": "devices", "generico": true},
-        {"id": "version", "titulo": "Versión de ADB", "desc": "adb version", "accion": "version", "generico": true},
-        {"id": "start_server", "titulo": "Iniciar servidor ADB", "desc": "adb start-server", "accion": "start_server", "generico": true},
-        {"id": "kill_server", "titulo": "Detener servidor ADB", "desc": "adb kill-server", "accion": "kill_server", "generico": true},
-        {"id": "host_features", "titulo": "Capacidades del host", "desc": "adb host-features (características soportadas)", "accion": "host_features", "generico": true},
-        {"id": "help", "titulo": "Ayuda de ADB", "desc": "adb help (uso completo)", "accion": "help", "generico": true}
+        {"id": "devices", "titulo": "Listar dispositivos", "desc": "adb devices -l (detalle y estado de cada conexión)", "accion": "devices"},
+        {"id": "get_state", "titulo": "Estado, serial y ruta USB", "desc": "adb get-state / get-serialno / get-devpath", "accion": "get_state"},
+        {"id": "wait_for_device", "titulo": "Esperar dispositivo", "desc": "adb wait-for-device (hasta 120 s)", "accion": "wait_for_device"},
+        {"id": "reconnect", "titulo": "Reconectar", "desc": "adb reconnect [offline|device] (fuerza la reconexión del transporte)", "accion": "reconnect", "campos": [{"clave": "target", "tipo": "select", "etiqueta": "Qué reconectar", "defecto": "", "opciones": [{"valor": "", "etiqueta": "Todo (host)"}, {"valor": "offline", "etiqueta": "Solo los offline"}, {"valor": "device", "etiqueta": "Desde el dispositivo"}]}]},
+        {"id": "version", "titulo": "Versión de ADB", "desc": "adb version", "accion": "version"},
+        {"id": "start_server", "titulo": "Iniciar servidor ADB", "desc": "adb start-server", "accion": "start_server"},
+        {"id": "kill_server", "titulo": "Detener servidor ADB", "desc": "adb kill-server (la app pausa el sondeo hasta que pulses Refrescar)", "accion": "kill_server"},
+        {"id": "host_features", "titulo": "Capacidades del host", "desc": "adb host-features (características soportadas)", "accion": "host_features"},
+        {"id": "help", "titulo": "Ayuda de ADB", "desc": "adb help (uso completo)", "accion": "help"}
       ]
     },
     {
       "id": "conexion",
       "titulo": "Conexión Inalámbrica",
       "icono": "📶",
-      "desc": "ADB por Wi-Fi: TCP/IP, conectarse y desconectarse por IP.",
+      "desc": "ADB por Wi-Fi: emparejar (Android 11+), TCP/IP, conectarse y desconectarse por IP.",
       "comandos": [
+        {"id": "device_ip", "titulo": "IP Wi-Fi del celular", "desc": "ip addr show wlan0 (para usar en Conectar por IP)", "accion": "device_ip"},
+        {"id": "pair", "titulo": "Emparejar (Wi-Fi sin cable)", "desc": "adb pair <ip:puerto> <código> · Ajustes → Depuración inalámbrica → Vincular con código", "accion": "pair", "campos": [{"clave": "ip", "tipo": "texto", "etiqueta": "IP:puerto de emparejamiento", "defecto": "192.168.1.15:37000"}, {"clave": "code", "tipo": "numero", "etiqueta": "Código de 6 dígitos"}]},
         {"id": "tcpip", "titulo": "Activar puerto TCP/IP", "desc": "adb tcpip <puerto> (requiere cable USB la 1ª vez)", "accion": "tcpip", "campos": [{"clave": "port", "tipo": "numero", "etiqueta": "Puerto", "defecto": "5555"}]},
-        {"id": "connect", "titulo": "Conectar por IP", "desc": "adb connect <ip:puerto>", "accion": "connect", "campos": [{"clave": "ip", "tipo": "texto", "etiqueta": "IP del celular", "defecto": "192.168.1.15:5555"}]},
-        {"id": "disconnect", "titulo": "Desconectar", "desc": "adb disconnect (vacío = todas las conexiones)", "accion": "disconnect", "campos": [{"clave": "ip", "tipo": "texto", "etiqueta": "IP (opcional)", "defecto": ""}]},
+        {"id": "connect", "titulo": "Conectar por IP", "desc": "adb connect <ip:puerto> (marca error si adb responde 'failed to connect')", "accion": "connect", "campos": [{"clave": "ip", "tipo": "texto", "etiqueta": "IP del celular", "defecto": "192.168.1.15:5555"}]},
+        {"id": "disconnect", "titulo": "Desconectar", "desc": "adb disconnect (vacío = todas las conexiones)", "accion": "disconnect", "campos": [{"clave": "ip", "tipo": "texto", "etiqueta": "IP (opcional)", "defecto": "", "opcional": true}]},
         {"id": "usb", "titulo": "Volver a USB", "desc": "adb usb (retorna al transporte USB)", "accion": "usb"},
-        {"id": "mdns_check", "titulo": "Verificar mDNS", "desc": "adb mdns check", "accion": "mdns_check"},
-        {"id": "mdns_services", "titulo": "Servicios mDNS", "desc": "adb mdns services (dispositivos _adb._tcp)", "accion": "mdns_services"}
+        {"id": "mdns_check", "titulo": "Verificar mDNS", "desc": "adb mdns check (requiere platform-tools de Google; el adb de Arch no lo soporta)", "accion": "mdns_check"},
+        {"id": "mdns_services", "titulo": "Servicios mDNS", "desc": "adb mdns services (requiere platform-tools de Google)", "accion": "mdns_services"}
       ]
     },
     {
       "id": "transferencia",
       "titulo": "Archivos y Transferencia",
       "icono": "🚀",
-      "desc": "push/pull/sync y copias rápidas de carpetas típicas.",
+      "desc": "push/pull, sincronización y copias rápidas de carpetas típicas.",
       "comandos": [
-        {"id": "push", "titulo": "Subir archivo (push)", "desc": "adb push <local> <remoto>", "accion": "push", "campos": [{"clave": "origen", "tipo": "archivo", "etiqueta": "Archivo local"}, {"clave": "destino", "tipo": "texto", "etiqueta": "Ruta en el celular", "defecto": "/sdcard/Download/"}]},
-        {"id": "pull", "titulo": "Bajar archivo/carpeta (pull)", "desc": "adb pull <remoto> <local>", "accion": "pull", "campos": [{"clave": "origen", "tipo": "texto", "etiqueta": "Ruta en el celular", "defecto": "/sdcard/Music/"}, {"clave": "destino", "tipo": "carpeta", "etiqueta": "Carpeta destino en PC"}]},
-        {"id": "sync", "titulo": "Sincronizar (sync)", "desc": "adb sync <directorio>", "accion": "sync", "campos": [{"clave": "ruta", "tipo": "texto", "etiqueta": "Directorio (data, obb o system)", "defecto": "data"}]},
-        {"id": "q_musica", "titulo": "🎵 Copiar Música", "desc": "pull /sdcard/Music/ → ~/Música", "accion": "quick_pull", "args": {"origen": "/sdcard/Music/", "destino": "MUSIC"}},
-        {"id": "q_camara", "titulo": "📸 Copiar Cámara", "desc": "pull /sdcard/DCIM/ → ~/Imágenes/Camera", "accion": "quick_pull", "args": {"origen": "/sdcard/DCIM/", "destino": "PICTURES", "sub": "Camera"}},
+        {"id": "push", "titulo": "Subir archivo (push)", "desc": "adb push <local> <remoto>", "accion": "push", "campos": [{"clave": "origen", "tipo": "archivo", "etiqueta": "Archivo o carpeta local"}, {"clave": "destino", "tipo": "texto", "etiqueta": "Ruta en el celular", "defecto": "/sdcard/Download/"}]},
+        {"id": "pull", "titulo": "Bajar archivo/carpeta (pull)", "desc": "adb pull <remoto> <local> (una carpeta remota se copia como subcarpeta del destino)", "accion": "pull", "campos": [{"clave": "origen", "tipo": "texto", "etiqueta": "Ruta en el celular", "defecto": "/sdcard/Music/"}, {"clave": "destino", "tipo": "carpeta", "etiqueta": "Carpeta destino en PC", "defecto": "~/Descargas"}]},
+        {"id": "sync_push", "titulo": "Sincronizar carpeta al celular", "desc": "adb push --sync <carpeta local> <ruta remota> (solo copia archivos nuevos o modificados)", "accion": "sync_push", "campos": [{"clave": "origen", "tipo": "carpeta", "etiqueta": "Carpeta local"}, {"clave": "destino", "tipo": "texto", "etiqueta": "Ruta en el celular", "defecto": "/sdcard/Download/"}]},
+        {"id": "q_musica", "titulo": "🎵 Copiar Música", "desc": "pull /sdcard/Music/ → ~/Música (contenido directo, sin subcarpeta)", "accion": "quick_pull", "args": {"origen": "/sdcard/Music/", "destino": "MUSIC"}},
+        {"id": "q_camara", "titulo": "📸 Copiar Cámara", "desc": "pull /sdcard/DCIM/Camera/ → ~/Imágenes/Camera", "accion": "quick_pull", "args": {"origen": "/sdcard/DCIM/Camera/", "destino": "PICTURES", "sub": "Camera"}},
         {"id": "q_imagenes", "titulo": "🖼️ Copiar Imágenes", "desc": "pull /sdcard/Pictures/ → ~/Imágenes", "accion": "quick_pull", "args": {"origen": "/sdcard/Pictures/", "destino": "PICTURES"}},
         {"id": "q_descargas", "titulo": "📥 Copiar Descargas", "desc": "pull /sdcard/Download/ → ~/Descargas", "accion": "quick_pull", "args": {"origen": "/sdcard/Download/", "destino": "DOWNLOAD"}}
       ]
@@ -63,15 +68,21 @@
           {"flag": "-d", "etiqueta": "Permitir downgrade", "defecto": false},
           {"flag": "-t", "etiqueta": "Permitir APK de prueba", "defecto": false},
           {"flag": "-s", "etiqueta": "Instalar en SD", "defecto": false}
-        ], "timeout": 300},
-        {"id": "install_multiple", "titulo": "Instalar múltiples APKs", "desc": "adb install-multiple (varias bases + patch)", "accion": "install_multiple", "campos": [{"clave": "apks", "tipo": "archivos", "etiqueta": "Archivos .apk"}], "opciones": [
+        ]},
+        {"id": "install_multiple", "titulo": "Instalar APK dividido (splits)", "desc": "adb install-multiple base.apk split_*.apk (UNA app dividida, p. ej. XAPK/APKM extraído)", "accion": "install_multiple", "campos": [{"clave": "apks", "tipo": "archivos", "etiqueta": "Archivos .apk de la misma app"}], "opciones": [
           {"flag": "-r", "etiqueta": "Reinstalar manteniendo datos", "defecto": true},
           {"flag": "-g", "etiqueta": "Otorgar permisos", "defecto": true}
-        ], "timeout": 600},
-        {"id": "uninstall", "titulo": "Desinstalar app", "desc": "adb uninstall [-k] <paquete>", "accion": "uninstall", "peligro": true, "confirmar": true, "campos": [{"clave": "package", "tipo": "paquete", "etiqueta": "Paquete (ej. com.example.app)"}], "opciones": [{"flag": "-k", "etiqueta": "Conservar datos (-k)", "defecto": false}]},
+        ]},
+        {"id": "install_multi_package", "titulo": "Instalar varias apps a la vez", "desc": "adb install-multi-package app1.apk app2.apk …", "accion": "install_multi_package", "campos": [{"clave": "apks", "tipo": "archivos", "etiqueta": "Archivos .apk (apps distintas)"}], "opciones": [
+          {"flag": "-r", "etiqueta": "Reinstalar manteniendo datos", "defecto": true},
+          {"flag": "-g", "etiqueta": "Otorgar permisos", "defecto": true}
+        ]},
+        {"id": "uninstall", "titulo": "Desinstalar app", "desc": "adb uninstall <paquete> · con -k: adb shell cmd package uninstall -k", "accion": "uninstall", "peligro": true, "confirmar": true, "campos": [{"clave": "package", "tipo": "paquete", "etiqueta": "Paquete (ej. com.example.app)"}], "opciones": [{"flag": "-k", "etiqueta": "Conservar datos (-k)", "defecto": false}]},
         {"id": "restore", "titulo": "Restaurar app de stock", "desc": "adb shell cmd package install-existing <paquete>", "accion": "restore", "campos": [{"clave": "package", "tipo": "paquete", "etiqueta": "Paquete"}]},
-        {"id": "extract", "titulo": "Extraer APK del celular", "desc": "pm path + pull → ~/Descargas/<paquete>.apk", "accion": "extract_apk", "campos": [{"clave": "package", "tipo": "paquete", "etiqueta": "Paquete (ej. com.android.chrome)"}]},
-        {"id": "sideload", "titulo": "Sideload OTA", "desc": "adb sideload <archivo .zip> (desde recovery)", "accion": "sideload", "campos": [{"clave": "ota", "tipo": "archivo", "etiqueta": "Paquete OTA .zip"}], "timeout": 1800}
+        {"id": "extract", "titulo": "Extraer APK del celular", "desc": "pm path + pull → ~/Descargas/<paquete>.apk (o carpeta con base + splits)", "accion": "extract_apk", "campos": [{"clave": "package", "tipo": "paquete", "etiqueta": "Paquete (ej. com.android.chrome)"}]},
+        {"id": "app_launch", "titulo": "Abrir app", "desc": "adb shell monkey -p <paquete> -c LAUNCHER 1", "accion": "app_launch", "campos": [{"clave": "package", "tipo": "paquete", "etiqueta": "Paquete"}]},
+        {"id": "app_info", "titulo": "Ficha de la app en Ajustes", "desc": "am start -a android.settings.APPLICATION_DETAILS_SETTINGS -d package:<paquete>", "accion": "app_info", "campos": [{"clave": "package", "tipo": "paquete", "etiqueta": "Paquete"}]},
+        {"id": "sideload", "titulo": "Sideload OTA", "desc": "adb sideload <archivo .zip> (desde recovery)", "accion": "sideload", "campos": [{"clave": "ota", "tipo": "archivo", "etiqueta": "Paquete OTA .zip"}]}
       ]
     },
     {
@@ -95,28 +106,31 @@
       "desc": "Reinicios, root, remount y herramientas de sistema.",
       "comandos": [
         {"id": "reboot", "titulo": "Reiniciar normal", "desc": "adb reboot", "accion": "reboot", "args": {"mode": "normal"}, "peligro": true, "confirmar": true},
-        {"id": "rb_bootloader", "titulo": "Reiniciar a Bootloader", "desc": "adb reboot bootloader", "accion": "reboot", "args": {"mode": "bootloader"}, "peligro": true, "confirmar": true},
+        {"id": "rb_bootloader", "titulo": "Reiniciar a Bootloader", "desc": "adb reboot bootloader (en Samsung usa 'Modo Download')", "accion": "reboot", "args": {"mode": "bootloader"}, "peligro": true, "confirmar": true},
+        {"id": "rb_download", "titulo": "Reiniciar a Modo Download (Samsung)", "desc": "adb reboot download (Odin)", "accion": "reboot", "args": {"mode": "download"}, "peligro": true, "confirmar": true},
+        {"id": "rb_fastboot", "titulo": "Reiniciar a fastbootd", "desc": "adb reboot fastboot (fastboot en userspace, Android 10+)", "accion": "reboot", "args": {"mode": "fastboot"}, "peligro": true, "confirmar": true},
         {"id": "rb_recovery", "titulo": "Reiniciar a Recovery", "desc": "adb reboot recovery", "accion": "reboot", "args": {"mode": "recovery"}, "peligro": true, "confirmar": true},
         {"id": "rb_sideload", "titulo": "Reiniciar a Sideload", "desc": "adb reboot sideload", "accion": "reboot", "args": {"mode": "sideload"}, "peligro": true, "confirmar": true},
         {"id": "rb_sideload_auto", "titulo": "Sideload auto-reboot", "desc": "adb reboot sideload-auto-reboot", "accion": "reboot", "args": {"mode": "sideload-auto-reboot"}, "peligro": true, "confirmar": true},
-        {"id": "soft_reboot", "titulo": "Reinicio suave (soft)", "desc": "adb shell ctl.restart zygote", "accion": "soft_reboot", "peligro": true, "confirmar": true},
-        {"id": "safemode", "titulo": "Modo seguro", "desc": "setprop persist.sys.safemode 1 + reboot", "accion": "reboot", "args": {"mode": "safemode"}, "peligro": true, "confirmar": true},
-        {"id": "root", "titulo": "Reiniciar adbd como root", "desc": "adb root (en builds userdebug/eng)", "accion": "root"},
+        {"id": "soft_reboot", "titulo": "Reinicio suave (requiere root)", "desc": "adb shell setprop ctl.restart zygote · solo builds userdebug/eng o adbd root", "accion": "soft_reboot", "peligro": true, "confirmar": true},
+        {"id": "safemode", "titulo": "Modo seguro (requiere root)", "desc": "setprop persist.sys.safemode 1 + reboot · si setprop falla NO se reinicia", "accion": "reboot", "args": {"mode": "safemode"}, "peligro": true, "confirmar": true},
+        {"id": "root", "titulo": "Reiniciar adbd como root", "desc": "adb root (solo builds userdebug/eng; en producción adbd lo rechaza)", "accion": "root"},
         {"id": "unroot", "titulo": "Reiniciar adbd como usuario", "desc": "adb unroot", "accion": "unroot"},
         {"id": "remount", "titulo": "Remontar particiones", "desc": "adb remount (requiere root)", "accion": "remount"},
-        {"id": "bugreport", "titulo": "Generar bugreport", "desc": "adb bugreport → ~/Descargas", "accion": "bugreport", "timeout": 600}
+        {"id": "bugreport", "titulo": "Generar bugreport", "desc": "adb bugreport → ~/Descargas/bugreport_gekko_<fecha>.zip", "accion": "bugreport"}
       ]
     },
     {
       "id": "shell",
       "titulo": "Shell y Consola",
       "icono": "💻",
-      "desc": "Terminal ADB integrada, getprop/setprop y comandos libres.",
+      "desc": "Consola ADB integrada, getprop/setprop y comandos libres.",
       "comandos": [
-        {"id": "terminal", "titulo": "Terminal ADB Shell", "desc": "Consola integrada en el panel inferior", "accion": "terminal", "especial": "terminal"},
-        {"id": "custom", "titulo": "Ejecutar comando libre", "desc": "adb <comando> (ej. shell dumpsys battery)", "accion": "custom", "campos": [{"clave": "command", "tipo": "texto", "etiqueta": "Comando ADB completo"}]},
-        {"id": "getprop", "titulo": "Consultar propiedad (getprop)", "desc": "adb shell getprop [clave]", "accion": "getprop", "campos": [{"clave": "key", "tipo": "texto", "etiqueta": "Clave (vacío = todas)", "defecto": "ro.product.model"}]},
-        {"id": "setprop", "titulo": "Fijar propiedad (setprop)", "desc": "adb shell setprop <clave> <valor>", "accion": "setprop", "campos": [{"clave": "key", "tipo": "texto", "etiqueta": "Clave", "defecto": "debug.sf.nobootanimation"}, {"clave": "value", "tipo": "texto", "etiqueta": "Valor", "defecto": "1"}]}
+        {"id": "terminal", "titulo": "Consola ADB", "desc": "Escribe subcomandos de adb en el panel inferior (p. ej. shell getprop ro.product.model)", "accion": "terminal", "especial": "terminal"},
+        {"id": "custom", "titulo": "Ejecutar comando libre", "desc": "adb <comando> · acepta comillas; 'adb' inicial opcional; logcat se ejecuta con -d", "accion": "custom", "campos": [{"clave": "command", "tipo": "texto", "etiqueta": "Comando ADB completo", "defecto": "shell dumpsys battery"}]},
+        {"id": "getprop", "titulo": "Consultar propiedad (getprop)", "desc": "adb shell getprop [clave]", "accion": "getprop", "campos": [{"clave": "key", "tipo": "texto", "etiqueta": "Clave (vacío = todas)", "defecto": "ro.product.model", "opcional": true}]},
+        {"id": "setprop", "titulo": "Fijar propiedad (setprop)", "desc": "adb shell setprop <clave> <valor> (persist.*/ro.* requieren root)", "accion": "setprop", "campos": [{"clave": "key", "tipo": "texto", "etiqueta": "Clave", "defecto": "debug.sf.nobootanimation"}, {"clave": "value", "tipo": "texto", "etiqueta": "Valor", "defecto": "1"}]},
+        {"id": "storage", "titulo": "Almacenamiento", "desc": "adb shell df -h /data /sdcard", "accion": "storage"}
       ]
     },
     {
@@ -125,33 +139,48 @@
       "icono": "📋",
       "desc": "Acciones pm (package manager) sobre cualquier app.",
       "comandos": [
-        {"id": "pm_list", "titulo": "Listar paquetes instalados", "desc": "adb shell pm list packages -u (todas, incl. desinstaladas)", "accion": "list_packages"},
+        {"id": "pm_list", "titulo": "Listar paquetes", "desc": "adb shell pm list packages [-u|-3|-s|-d|-e]", "accion": "list_packages", "campos": [{"clave": "filtro", "tipo": "select", "etiqueta": "Filtro", "defecto": "-u", "opciones": [{"valor": "-u", "etiqueta": "Todas (incl. desinstaladas)"}, {"valor": "", "etiqueta": "Instaladas"}, {"valor": "-3", "etiqueta": "Solo de terceros"}, {"valor": "-s", "etiqueta": "Solo de sistema"}, {"valor": "-d", "etiqueta": "Solo desactivadas"}, {"valor": "-e", "etiqueta": "Solo activadas"}]}]},
         {"id": "pm_disable", "titulo": "Desactivar app", "desc": "adb shell pm disable-user --user 0 <paquete>", "accion": "pm_action", "args": {"action": "disable"}, "campos": [{"clave": "package", "tipo": "paquete", "etiqueta": "Paquete"}]},
-        {"id": "pm_enable", "titulo": "Reactivar app", "desc": "adb shell pm enable <paquete>", "accion": "pm_action", "args": {"action": "enable"}, "campos": [{"clave": "package", "tipo": "paquete", "etiqueta": "Paquete"}]},
+        {"id": "pm_enable", "titulo": "Reactivar app", "desc": "adb shell pm enable --user 0 <paquete>", "accion": "pm_action", "args": {"action": "enable"}, "campos": [{"clave": "package", "tipo": "paquete", "etiqueta": "Paquete"}]},
         {"id": "pm_clear", "titulo": "Limpiar datos", "desc": "adb shell pm clear <paquete>", "accion": "pm_action", "args": {"action": "clear"}, "peligro": true, "confirmar": true, "campos": [{"clave": "package", "tipo": "paquete", "etiqueta": "Paquete"}]},
         {"id": "pm_stop", "titulo": "Forzar detención", "desc": "adb shell am force-stop <paquete>", "accion": "pm_action", "args": {"action": "force-stop"}, "campos": [{"clave": "package", "tipo": "paquete", "etiqueta": "Paquete"}]},
-        {"id": "pm_uninstall0", "titulo": "Desinstalar (usuario 0)", "desc": "adb shell pm uninstall --user 0 <paquete> (debloat)", "accion": "pm_action", "args": {"action": "uninstall"}, "peligro": true, "confirmar": true, "campos": [{"clave": "package", "tipo": "paquete", "etiqueta": "Paquete"}]}
+        {"id": "pm_uninstall0", "titulo": "Desinstalar (usuario 0)", "desc": "adb shell pm uninstall --user 0 <paquete> (debloat; se deshace con 'Restaurar app de stock')", "accion": "pm_action", "args": {"action": "uninstall"}, "peligro": true, "confirmar": true, "campos": [{"clave": "package", "tipo": "paquete", "etiqueta": "Paquete"}]},
+        {"id": "pm_grant", "titulo": "Conceder permiso", "desc": "adb shell pm grant <paquete> <permiso>", "accion": "pm_action", "args": {"action": "grant"}, "campos": [{"clave": "package", "tipo": "paquete", "etiqueta": "Paquete"}, {"clave": "permission", "tipo": "texto", "etiqueta": "Permiso", "defecto": "android.permission.WRITE_SECURE_SETTINGS"}]},
+        {"id": "pm_revoke", "titulo": "Revocar permiso", "desc": "adb shell pm revoke <paquete> <permiso>", "accion": "pm_action", "args": {"action": "revoke"}, "campos": [{"clave": "package", "tipo": "paquete", "etiqueta": "Paquete"}, {"clave": "permission", "tipo": "texto", "etiqueta": "Permiso", "defecto": "android.permission.READ_LOGS"}]},
+        {"id": "dumpsys_package", "titulo": "Detalle de un paquete", "desc": "adb shell dumpsys package <paquete>", "accion": "dumpsys_package", "campos": [{"clave": "package", "tipo": "paquete", "etiqueta": "Paquete"}]}
       ]
     },
     {
       "id": "ajustes",
       "titulo": "Ajustes y Pantalla",
       "icono": "⚙️",
-      "desc": "settings, navegación, animaciones, densidad y tamaño.",
+      "desc": "settings, navegación, animaciones, densidad, tamaño y rotación.",
       "comandos": [
         {"id": "settings_put", "titulo": "Cambiar ajuste (settings put)", "desc": "adb shell settings put <espacio> <clave> <valor>", "accion": "settings_put", "campos": [
+          {"clave": "space", "tipo": "select", "etiqueta": "Espacio", "defecto": "global", "opciones": [{"valor": "secure", "etiqueta": "secure"}, {"valor": "global", "etiqueta": "global"}, {"valor": "system", "etiqueta": "system"}]},
+          {"clave": "key", "tipo": "texto", "etiqueta": "Clave", "defecto": "stay_on_while_plugged_in"},
+          {"clave": "value", "tipo": "texto", "etiqueta": "Valor", "defecto": "7"}]},
+        {"id": "settings_get", "titulo": "Leer ajuste (settings get)", "desc": "adb shell settings get <espacio> <clave>", "accion": "settings_get", "campos": [
           {"clave": "space", "tipo": "select", "etiqueta": "Espacio", "defecto": "secure", "opciones": [{"valor": "secure", "etiqueta": "secure"}, {"valor": "global", "etiqueta": "global"}, {"valor": "system", "etiqueta": "system"}]},
-          {"clave": "key", "tipo": "texto", "etiqueta": "Clave", "defecto": "navigation_mode"},
-          {"clave": "value", "tipo": "texto", "etiqueta": "Valor", "defecto": "2"}]},
-        {"id": "nav_gestos", "titulo": "Navegación por gestos", "desc": "settings put secure navigation_mode 2", "accion": "nav_mode", "args": {"mode": "2"}},
-        {"id": "nav_botones", "titulo": "Navegación 3 botones", "desc": "settings put secure navigation_mode 0", "accion": "nav_mode", "args": {"mode": "0"}},
-        {"id": "anim_half", "titulo": "Animaciones 0.5x", "desc": "Escala de animaciones a la mitad", "accion": "anim_scale", "args": {"scale": "0.5"}},
-        {"id": "anim_off", "titulo": "Desactivar animaciones", "desc": "Escala 0 (sistema más fluido)", "accion": "anim_scale", "args": {"scale": "0.0"}},
-        {"id": "anim_reset", "titulo": "Restablecer animaciones", "desc": "Escala 1.0", "accion": "anim_scale", "args": {"scale": "1.0"}},
+          {"clave": "key", "tipo": "texto", "etiqueta": "Clave", "defecto": "navigation_mode"}]},
+        {"id": "settings_list", "titulo": "Listar ajustes (settings list)", "desc": "adb shell settings list <espacio>", "accion": "settings_list", "campos": [
+          {"clave": "space", "tipo": "select", "etiqueta": "Espacio", "defecto": "global", "opciones": [{"valor": "secure", "etiqueta": "secure"}, {"valor": "global", "etiqueta": "global"}, {"valor": "system", "etiqueta": "system"}]}]},
+        {"id": "settings_delete", "titulo": "Borrar ajuste (settings delete)", "desc": "adb shell settings delete <espacio> <clave>", "accion": "settings_delete", "peligro": true, "confirmar": true, "campos": [
+          {"clave": "space", "tipo": "select", "etiqueta": "Espacio", "defecto": "global", "opciones": [{"valor": "secure", "etiqueta": "secure"}, {"valor": "global", "etiqueta": "global"}, {"valor": "system", "etiqueta": "system"}]},
+          {"clave": "key", "tipo": "texto", "etiqueta": "Clave"}]},
+        {"id": "nav_gestos", "titulo": "Navegación por gestos", "desc": "cmd overlay enable-exclusive --category …navbar.gestural (+ clave del fabricante) y verificación", "accion": "nav_mode", "args": {"mode": "2"}},
+        {"id": "nav_botones", "titulo": "Navegación 3 botones", "desc": "cmd overlay enable-exclusive --category …navbar.threebutton (+ clave del fabricante) y verificación", "accion": "nav_mode", "args": {"mode": "0"}},
+        {"id": "anim_half", "titulo": "Animaciones 0.5x", "desc": "settings put global *_animation_scale 0.5", "accion": "anim_scale", "args": {"scale": "0.5"}},
+        {"id": "anim_off", "titulo": "Desactivar animaciones", "desc": "settings put global *_animation_scale 0 (sistema más fluido)", "accion": "anim_scale", "args": {"scale": "0.0"}},
+        {"id": "anim_reset", "titulo": "Restablecer animaciones", "desc": "settings put global *_animation_scale 1.0", "accion": "anim_scale", "args": {"scale": "1.0"}},
         {"id": "density", "titulo": "Cambiar densidad (DPI)", "desc": "adb shell wm density <dpi>", "accion": "density", "campos": [{"clave": "dpi", "tipo": "numero", "etiqueta": "DPI", "defecto": "420"}]},
         {"id": "density_reset", "titulo": "Restablecer DPI nativo", "desc": "adb shell wm density reset", "accion": "density_reset"},
-        {"id": "wm_size", "titulo": "Cambiar tamaño de pantalla", "desc": "adb shell wm size WxH", "accion": "wm_size", "campos": [{"clave": "size", "tipo": "texto", "etiqueta": "Tamaño WxH", "defecto": "1080x2400"}]},
-        {"id": "wm_size_reset", "titulo": "Restablecer tamaño", "desc": "adb shell wm size reset", "accion": "wm_size_reset"}
+        {"id": "wm_size", "titulo": "Cambiar tamaño de pantalla", "desc": "adb shell wm size WxH (usa 'Restablecer tamaño' si la pantalla queda mal)", "accion": "wm_size", "peligro": true, "confirmar": true, "campos": [{"clave": "size", "tipo": "texto", "etiqueta": "Tamaño WxH", "defecto": "1080x2400"}]},
+        {"id": "wm_size_reset", "titulo": "Restablecer tamaño", "desc": "adb shell wm size reset", "accion": "wm_size_reset"},
+        {"id": "rotation", "titulo": "Rotación de pantalla", "desc": "settings put system accelerometer_rotation / user_rotation", "accion": "rotation", "campos": [{"clave": "mode", "tipo": "select", "etiqueta": "Rotación", "defecto": "auto", "opciones": [{"valor": "auto", "etiqueta": "Automática"}, {"valor": "0", "etiqueta": "Bloquear vertical (0°)"}, {"valor": "90", "etiqueta": "Bloquear 90°"}, {"valor": "180", "etiqueta": "Bloquear 180°"}, {"valor": "270", "etiqueta": "Bloquear 270°"}]}]},
+        {"id": "overlay_list", "titulo": "Listar overlays (RRO)", "desc": "adb shell cmd overlay list", "accion": "overlay_list"},
+        {"id": "overlay_enable", "titulo": "Activar overlay", "desc": "adb shell cmd overlay enable <paquete>", "accion": "overlay_enable", "campos": [{"clave": "package", "tipo": "paquete", "etiqueta": "Paquete del overlay"}]},
+        {"id": "overlay_disable", "titulo": "Desactivar overlay", "desc": "adb shell cmd overlay disable <paquete>", "accion": "overlay_disable", "campos": [{"clave": "package", "tipo": "paquete", "etiqueta": "Paquete del overlay"}]}
       ]
     },
     {
@@ -169,8 +198,9 @@
         {"id": "rol_sms_xiaomi", "titulo": "Xiaomi SMS", "desc": "Asignar SMS role a la app de mensajes Xiaomi", "accion": "role_set", "args": {"role": "android.app.role.SMS", "package": "com.android.mms"}},
         {"id": "rol_dialer_google", "titulo": "Google Phone", "desc": "Asignar DIALER role a Google Phone", "accion": "role_set", "args": {"role": "android.app.role.DIALER", "package": "com.google.android.dialer"}},
         {"id": "rol_dialer_samsung", "titulo": "Samsung Phone", "desc": "Asignar DIALER role al marcador Samsung", "accion": "role_set", "args": {"role": "android.app.role.DIALER", "package": "com.samsung.android.dialer"}},
-        {"id": "rol_dialer_xiaomi", "titulo": "Xiaomi Phone", "desc": "Asignar DIALER role al marcador Xiaomi", "accion": "role_set", "args": {"role": "android.app.role.DIALER", "package": "com.android.dialer"}},
-        {"id": "rol_assist_gemini", "titulo": "Asistente Gemini", "desc": "Asignar ASSISTANT role a Gemini", "accion": "role_set", "args": {"role": "android.app.role.ASSISTANT", "package": "com.google.android.apps.bard"}},
+        {"id": "rol_dialer_xiaomi", "titulo": "Xiaomi Phone", "desc": "Asignar DIALER role al marcador Xiaomi (com.android.contacts, 'Contactos y marcador')", "accion": "role_set", "args": {"role": "android.app.role.DIALER", "package": "com.android.contacts"}},
+        {"id": "rol_assist_gemini", "titulo": "Asistente Gemini", "desc": "Asignar ASSISTANT role a Gemini (si la app no lo acepta, usa el Google app: com.google.android.googlequicksearchbox)", "accion": "role_set", "args": {"role": "android.app.role.ASSISTANT", "package": "com.google.android.apps.bard"}},
+        {"id": "rol_assist_google", "titulo": "Asistente de Google", "desc": "Asignar ASSISTANT role al Google app", "accion": "role_set", "args": {"role": "android.app.role.ASSISTANT", "package": "com.google.android.googlequicksearchbox"}},
         {"id": "rol_assist_bixby", "titulo": "Asistente Bixby", "desc": "Asignar ASSISTANT role a Bixby", "accion": "role_set", "args": {"role": "android.app.role.ASSISTANT", "package": "com.samsung.android.bixby.agent"}},
         {"id": "role_custom", "titulo": "Asignar rol personalizado", "desc": "cmd role add-role-holder <rol> <paquete>", "accion": "role_set", "campos": [
           {"clave": "role", "tipo": "select", "etiqueta": "Rol", "defecto": "android.app.role.HOME", "opciones": [
@@ -180,7 +210,7 @@
             {"valor": "android.app.role.ASSISTANT", "etiqueta": "ASSISTANT (Asistente)"},
             {"valor": "android.app.role.BROWSER", "etiqueta": "BROWSER (Navegador)"}]},
           {"clave": "package", "tipo": "paquete", "etiqueta": "Paquete"}]},
-        {"id": "role_holders", "titulo": "Ver titulares de roles", "desc": "cmd role get-role-holders", "accion": "role_list"}
+        {"id": "role_holders", "titulo": "Ver titulares de roles", "desc": "cmd role get-role-holders (Android 14+; antes se derivan de settings)", "accion": "role_list"}
       ]
     },
     {
@@ -193,13 +223,45 @@
         {"id": "key_back", "titulo": "Atrás (BACK)", "desc": "input keyevent 4", "accion": "input_key", "args": {"key": "4"}},
         {"id": "key_recents", "titulo": "Multitarea (RECENTS)", "desc": "input keyevent 187", "accion": "input_key", "args": {"key": "187"}},
         {"id": "key_power", "titulo": "Encendido (POWER)", "desc": "input keyevent 26", "accion": "input_key", "args": {"key": "26"}},
+        {"id": "key_wake", "titulo": "Despertar pantalla", "desc": "input keyevent 224 (WAKEUP)", "accion": "input_key", "args": {"key": "224"}},
+        {"id": "key_sleep", "titulo": "Apagar pantalla", "desc": "input keyevent 223 (SLEEP)", "accion": "input_key", "args": {"key": "223"}},
         {"id": "key_volup", "titulo": "Subir volumen", "desc": "input keyevent 24", "accion": "input_key", "args": {"key": "24"}},
         {"id": "key_voldown", "titulo": "Bajar volumen", "desc": "input keyevent 25", "accion": "input_key", "args": {"key": "25"}},
-        {"id": "key_enter", "titulo": "Enter", "desc": "input keyevent 66", "accion": "input_key", "args": {"key": "66"}},
         {"id": "key_mute", "titulo": "Silenciar", "desc": "input keyevent 164", "accion": "input_key", "args": {"key": "164"}},
-        {"id": "text", "titulo": "Escribir texto", "desc": "input text <texto>", "accion": "input_text", "campos": [{"clave": "text", "tipo": "texto", "etiqueta": "Texto a enviar"}]},
+        {"id": "key_enter", "titulo": "Enter", "desc": "input keyevent 66", "accion": "input_key", "args": {"key": "66"}},
+        {"id": "key_menu", "titulo": "Menú", "desc": "input keyevent 82", "accion": "input_key", "args": {"key": "82"}},
+        {"id": "key_camera", "titulo": "Cámara", "desc": "input keyevent 27", "accion": "input_key", "args": {"key": "27"}},
+        {"id": "key_play", "titulo": "Reproducir / Pausa", "desc": "input keyevent 85", "accion": "input_key", "args": {"key": "85"}},
+        {"id": "key_next", "titulo": "Siguiente pista", "desc": "input keyevent 87", "accion": "input_key", "args": {"key": "87"}},
+        {"id": "key_prev", "titulo": "Pista anterior", "desc": "input keyevent 88", "accion": "input_key", "args": {"key": "88"}},
+        {"id": "key_custom", "titulo": "Keyevent personalizado", "desc": "input keyevent <código>", "accion": "input_key", "campos": [{"clave": "key", "tipo": "numero", "etiqueta": "Keycode", "defecto": "3"}]},
+        {"id": "text", "titulo": "Escribir texto", "desc": "input text <texto> (los espacios se envían como %s; el texto va entrecomillado)", "accion": "input_text", "campos": [{"clave": "text", "tipo": "texto", "etiqueta": "Texto a enviar"}]},
         {"id": "tap", "titulo": "Tocar en pantalla (tap)", "desc": "input tap <x> <y>", "accion": "input_tap", "campos": [{"clave": "x", "tipo": "numero", "etiqueta": "X", "defecto": "540"}, {"clave": "y", "tipo": "numero", "etiqueta": "Y", "defecto": "1200"}]},
-        {"id": "swipe", "titulo": "Deslizar (swipe)", "desc": "input swipe x1 y1 x2 y2 [ms]", "accion": "input_swipe", "campos": [{"clave": "x1", "tipo": "numero", "etiqueta": "X inicial", "defecto": "540"}, {"clave": "y1", "tipo": "numero", "etiqueta": "Y inicial", "defecto": "2200"}, {"clave": "x2", "tipo": "numero", "etiqueta": "X final", "defecto": "540"}, {"clave": "y2", "tipo": "numero", "etiqueta": "Y final", "defecto": "400"}, {"clave": "dur", "tipo": "numero", "etiqueta": "Duración ms", "defecto": "300"}]}
+        {"id": "swipe", "titulo": "Deslizar (swipe)", "desc": "input swipe x1 y1 x2 y2 [ms]", "accion": "input_swipe", "campos": [{"clave": "x1", "tipo": "numero", "etiqueta": "X inicial", "defecto": "540"}, {"clave": "y1", "tipo": "numero", "etiqueta": "Y inicial", "defecto": "2200"}, {"clave": "x2", "tipo": "numero", "etiqueta": "X final", "defecto": "540"}, {"clave": "y2", "tipo": "numero", "etiqueta": "Y final", "defecto": "400"}, {"clave": "dur", "tipo": "numero", "etiqueta": "Duración ms", "defecto": "300"}]},
+        {"id": "sb_notif", "titulo": "Abrir notificaciones", "desc": "cmd statusbar expand-notifications", "accion": "statusbar", "args": {"what": "expand-notifications"}},
+        {"id": "sb_settings", "titulo": "Abrir ajustes rápidos", "desc": "cmd statusbar expand-settings", "accion": "statusbar", "args": {"what": "expand-settings"}},
+        {"id": "sb_collapse", "titulo": "Cerrar panel", "desc": "cmd statusbar collapse", "accion": "statusbar", "args": {"what": "collapse"}},
+        {"id": "open_url", "titulo": "Abrir URL en el celular", "desc": "am start -a android.intent.action.VIEW -d <url>", "accion": "open_url", "campos": [{"clave": "url", "tipo": "texto", "etiqueta": "URL", "defecto": "https://github.com/The-Gekko"}]},
+        {"id": "open_settings", "titulo": "Abrir Ajustes", "desc": "am start -a android.settings.SETTINGS", "accion": "am_start", "args": {"intent": "android.settings.SETTINGS"}},
+        {"id": "open_dev", "titulo": "Abrir Opciones de desarrollador", "desc": "am start -a android.settings.APPLICATION_DEVELOPMENT_SETTINGS", "accion": "am_start", "args": {"intent": "android.settings.APPLICATION_DEVELOPMENT_SETTINGS"}}
+      ]
+    },
+    {
+      "id": "servicios",
+      "titulo": "Radios y Energía",
+      "icono": "📡",
+      "desc": "svc: Wi-Fi, datos, Bluetooth y pantalla siempre encendida.",
+      "comandos": [
+        {"id": "wifi_on", "titulo": "Wi-Fi ON", "desc": "svc wifi enable", "accion": "svc", "args": {"what": "wifi_on"}},
+        {"id": "wifi_off", "titulo": "Wi-Fi OFF", "desc": "svc wifi disable (si estás por Wi-Fi perderás la conexión ADB)", "accion": "svc", "args": {"what": "wifi_off"}, "peligro": true, "confirmar": true},
+        {"id": "data_on", "titulo": "Datos móviles ON", "desc": "svc data enable", "accion": "svc", "args": {"what": "data_on"}},
+        {"id": "data_off", "titulo": "Datos móviles OFF", "desc": "svc data disable", "accion": "svc", "args": {"what": "data_off"}},
+        {"id": "bt_on", "titulo": "Bluetooth ON", "desc": "svc bluetooth enable", "accion": "svc", "args": {"what": "bt_on"}},
+        {"id": "bt_off", "titulo": "Bluetooth OFF", "desc": "svc bluetooth disable", "accion": "svc", "args": {"what": "bt_off"}},
+        {"id": "stayon", "titulo": "Pantalla siempre encendida (cargando)", "desc": "svc power stayon true", "accion": "svc", "args": {"what": "stayon"}},
+        {"id": "stayoff", "titulo": "Pantalla: apagado normal", "desc": "svc power stayon false", "accion": "svc", "args": {"what": "stayoff"}},
+        {"id": "ime_list", "titulo": "Listar teclados (IME)", "desc": "adb shell ime list -s", "accion": "ime_list"},
+        {"id": "ime_set", "titulo": "Elegir teclado (IME)", "desc": "adb shell ime set <id>", "accion": "ime_set", "campos": [{"clave": "ime", "tipo": "texto", "etiqueta": "Id (paquete/.Servicio)", "defecto": "com.google.android.inputmethod.latin/com.android.inputmethod.latin.LatinIME"}]}
       ]
     },
     {
@@ -209,27 +271,33 @@
       "desc": "dumpsys, logcat, procesos, capturas y estado.",
       "comandos": [
         {"id": "db_battery", "titulo": "Estado de batería", "desc": "dumpsys battery (nivel, temp, voltaje, salud)", "accion": "dumpsys", "args": {"servicio": "battery"}},
-        {"id": "db_meminfo", "titulo": "Memoria RAM (meminfo)", "desc": "dumpsys meminfo (resumen de memoria)", "accion": "dumpsys", "args": {"servicio": "meminfo"}},
-        {"id": "db_cpu", "titulo": "Uso de CPU", "desc": "adb shell top -n 1 (procesos por CPU)", "accion": "top"},
-        {"id": "processes", "titulo": "Procesos en ejecución", "desc": "adb shell ps -A (primeros 100)", "accion": "processes"},
-        {"id": "logcat_read", "titulo": "Leer logcat", "desc": "logcat -d *:<nivel> [filtro]", "accion": "logcat_read", "campos": [
+        {"id": "bat_unplug", "titulo": "Simular desconexión del cargador", "desc": "dumpsys battery unplug (para probar ahorro de energía; revierte con Reset)", "accion": "battery_cmd", "args": {"cmd": "unplug"}},
+        {"id": "bat_level20", "titulo": "Simular batería al 20 %", "desc": "dumpsys battery set level 20", "accion": "battery_cmd", "args": {"cmd": "level20"}},
+        {"id": "bat_reset", "titulo": "Batería: volver a valores reales", "desc": "dumpsys battery reset", "accion": "battery_cmd", "args": {"cmd": "reset"}},
+        {"id": "db_meminfo", "titulo": "Memoria RAM (meminfo)", "desc": "dumpsys meminfo (volcado completo)", "accion": "dumpsys", "args": {"servicio": "meminfo"}},
+        {"id": "db_display", "titulo": "Pantallas (display)", "desc": "dumpsys display", "accion": "dumpsys", "args": {"servicio": "display"}},
+        {"id": "db_activity_top", "titulo": "Actividad en primer plano", "desc": "dumpsys activity activities (foco actual)", "accion": "dumpsys", "args": {"servicio": "activity", "extra": ["activities"]}},
+        {"id": "db_cpu", "titulo": "Uso de CPU", "desc": "adb shell top -b -n 1 -m 40 (procesos por CPU)", "accion": "top"},
+        {"id": "processes", "titulo": "Procesos en ejecución", "desc": "adb shell ps -A", "accion": "processes"},
+        {"id": "logcat_read", "titulo": "Leer logcat", "desc": "logcat -d -t 2000 *:<nivel>, filtro por texto, últimas 300 líneas", "accion": "logcat_read", "campos": [
           {"clave": "level", "tipo": "select", "etiqueta": "Nivel", "defecto": "V", "opciones": [{"valor": "V", "etiqueta": "Verbose"}, {"valor": "D", "etiqueta": "Debug"}, {"valor": "I", "etiqueta": "Info"}, {"valor": "W", "etiqueta": "Warning"}, {"valor": "E", "etiqueta": "Error"}]},
-          {"clave": "filter", "tipo": "texto", "etiqueta": "Filtro (vacío = todo)", "defecto": ""}]},
+          {"clave": "filter", "tipo": "texto", "etiqueta": "Filtro por texto (vacío = todo)", "defecto": "", "opcional": true}]},
         {"id": "logcat_clear", "titulo": "Limpiar búfer logcat", "desc": "adb logcat -c", "accion": "logcat_clear"},
-        {"id": "screenshot", "titulo": "Capturar pantalla", "desc": "screencap + pull → ~/Imágenes/screenshot_gekko.png", "accion": "screenshot"}
+        {"id": "screenshot", "titulo": "Capturar pantalla", "desc": "adb exec-out screencap -p → ~/Imágenes/screenshot_gekko_<fecha>.png", "accion": "screenshot"},
+        {"id": "screenrecord", "titulo": "Grabar pantalla (sin scrcpy)", "desc": "adb shell screenrecord --time-limit N → ~/Vídeos/screenrecord_gekko_<fecha>.mp4", "accion": "screenrecord", "campos": [{"clave": "seconds", "tipo": "numero", "etiqueta": "Segundos (1-180)", "defecto": "10"}]}
       ]
     },
     {
       "id": "scrcpy",
       "titulo": "Scrcpy & Espejo",
       "icono": "📺",
-      "desc": "Transmite la pantalla del celular a tu PC Linux.",
+      "desc": "Transmite la pantalla del celular a tu PC Linux (scrcpy 2.x/4.x).",
       "comandos": [
         {"id": "sc_standard", "titulo": "Espejo estándar", "desc": "scrcpy (latencia mínima)", "accion": "scrcpy", "args": {"mode": "standard"}},
-        {"id": "sc_screenoff", "titulo": "Pantalla apagada", "desc": "scrcpy -S --turn-screen-off", "accion": "scrcpy", "args": {"mode": "screenoff"}},
+        {"id": "sc_screenoff", "titulo": "Pantalla apagada", "desc": "scrcpy --turn-screen-off", "accion": "scrcpy", "args": {"mode": "screenoff"}},
         {"id": "sc_fps120", "titulo": "Ultra 120 FPS", "desc": "scrcpy --max-fps=120 --video-bit-rate=16M", "accion": "scrcpy", "args": {"mode": "fps120"}},
-        {"id": "sc_record", "titulo": "Grabar MP4", "desc": "scrcpy --record=~/Vídeos/scrcpy_record.mp4", "accion": "scrcpy", "args": {"mode": "record"}},
-        {"id": "sc_audio", "titulo": "Audio AAC", "desc": "scrcpy --audio-codec=aac", "accion": "scrcpy", "args": {"mode": "audio"}},
+        {"id": "sc_record", "titulo": "Grabar MP4", "desc": "scrcpy --record=~/Vídeos/scrcpy_<fecha>.mp4", "accion": "scrcpy", "args": {"mode": "record"}},
+        {"id": "sc_audio", "titulo": "Audio AAC", "desc": "scrcpy --audio-codec=aac (Android 11+)", "accion": "scrcpy", "args": {"mode": "audio"}},
         {"id": "sc_otg", "titulo": "Modo OTG", "desc": "scrcpy --otg (teclado/mouse físico)", "accion": "scrcpy", "args": {"mode": "otg"}}
       ]
     },
@@ -237,7 +305,7 @@
       "id": "debloat",
       "titulo": "Presets Debloat",
       "icono": "🧹",
-      "desc": "Limpieza 1-click de bloatware (cargado de debloat_presets.json).",
+      "desc": "Limpieza 1-click de bloatware (cargado de debloat_presets.json). Cada preset tiene su botón Restaurar.",
       "comandos": []
     }
   ]

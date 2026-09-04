@@ -25,11 +25,13 @@
 | 🖥️ **Interfaz nativa GTK** | Frontends GTK 4 y GTK 3 desde un mismo núcleo headless |
 | 🎨 **Tema Matugen dinámico** | El color del sistema, sincronizado con tu wallpaper en vivo |
 | 📊 **Dashboard multi-marca** | Samsung (Knox), Xiaomi / Redmi / Poco (Bootloader + Verified) y genéricos (SELinux) |
-| 🧹 **Presets de debloat** | Samsung, Xiaomi/HyperOS, MIUI y Google con un clic |
+| 🧹 **Presets de debloat** | Samsung, Xiaomi/HyperOS, MIUI y Google con un clic, cada uno con su botón **Restaurar** |
 | 👑 **Roles de sistema** | Launcher, SMS, teléfono y asistente por defecto |
-| 📦 **Instalación y transferencia** | APK, archivos y scripts de un vistazo |
-| 🔌 **USB / Wi-Fi** | Gestión completa del servidor ADB |
-| 📱 **scrcpy** | Espejo y control del dispositivo integrados |
+| 📦 **Instalación y transferencia** | APK, APK divididos (splits), varias apps a la vez, archivos y carpetas |
+| 🔌 **USB / Wi-Fi** | Servidor ADB, emparejamiento inalámbrico (`adb pair`), IP del teléfono, reconexión |
+| 📱 **scrcpy y screenrecord** | Espejo, grabación y captura de pantalla |
+| 🎮 **Control remoto** | Teclas, texto, toques, panel de notificaciones, abrir URL/ajustes, radios (svc) |
+| ✅ **Resultados honestos** | Cada botón muestra el comando real y marca error cuando adb falla (conectar, root, scrcpy…) |
 
 ---
 
@@ -121,9 +123,13 @@ install.sh             Instalador multi-distro (pacman / eopkg)
 ## 🧪 Tests
 
 ```bash
-python3 -m unittest discover -s . -p 'test_*.py'   # core + tema + GTK3
-python3 -m unittest test_ui_gtk4 -v                # GTK4 (proceso aparte)
+python3 -m unittest discover -s . -p 'test_*.py'   # core + tema + GTK3 (92 tests)
+python3 -m unittest test_ui_gtk4 -v                # GTK4 (proceso aparte; no coexiste con GTK3)
 ```
+
+Los tests del núcleo usan un `adb` falso que registra el **argv exacto** de
+cada llamada: cada botón del catálogo afirma el comando real que se envía a
+adb, con uno y con dos dispositivos conectados.
 
 ---
 
@@ -139,7 +145,8 @@ Esta es la lista en caso de que quieras hacerlo a mano o saber qué necesita:
 | `python` | Interpreta la app |
 | `python-gobject` | Bindings Python ↔ GTK |
 | `gtk3` / `gtk4` (Solus: `libgtk-3` / `libgtk-4`) | Toolkit de interfaz gráfica |
-| `android-tools` | Comandos ADB (`adb` + driver USB) |
+| `android-tools` | Comandos ADB (`adb`) |
+| `android-udev` *(Arch)* | Reglas udev para que el teléfono se detecte sin root |
 | `scrcpy` | Espejo y control de pantalla del teléfono |
 | `glib2` | Librerías base del entorno GTK |
 | `xdg-utils` | Integración con el escritorio |
@@ -150,14 +157,14 @@ Esta es la lista en caso de que quieras hacerlo a mano o saber qué necesita:
 Instalación manual (Arch/Garuda):
 
 ```bash
-sudo pacman -S --needed python python-gobject gtk3 gtk4 android-tools scrcpy glib2 xdg-utils xdg-user-dirs curl
+sudo pacman -S --needed python python-gobject gtk3 gtk4 android-tools android-udev scrcpy glib2 xdg-utils xdg-user-dirs curl
 sudo pacman -S matugen   # opcional
 ```
 
-Instalación manual (Solus):
+Instalación manual (Solus; ahí `python` es Python 2, el intérprete es `python3`):
 
 ```bash
-sudo eopkg install python python-gobject libgtk-3 libgtk-4 android-tools scrcpy glib2 xdg-utils xdg-user-dirs curl
+sudo eopkg install python3 python-gobject libgtk-3 libgtk-4 android-tools scrcpy glib2 xdg-utils xdg-user-dirs curl
 ```
 
 > Si `matugen` no está instalado, la app usa un tema de respaldo
@@ -165,6 +172,10 @@ sudo eopkg install python python-gobject libgtk-3 libgtk-4 android-tools scrcpy 
 > repos, así que la app usará el tema del sistema (todo lo demás funciona
 > igual: los paquetes `libgtk-3`/`libgtk-4`, `android-tools`, `scrcpy` y
 > `python-gobject` existen en los repos oficiales).
+>
+> El adb de `android-tools` en Arch se compila **sin mDNS**: los botones
+> "Verificar mDNS" y "Servicios mDNS" solo funcionan con las platform-tools
+> de Google. El resto no lo necesita.
 
 ### 📱 En tu teléfono (Android)
 
@@ -173,8 +184,14 @@ sudo eopkg install python python-gobject libgtk-3 libgtk-4 android-tools scrcpy 
 2. En **Ajustes → Opciones de desarrollador**, activa **"Depuración por USB"**.
 3. Conecta el teléfono por USB y acepta el diálogo **"¿Permitir depuración USB?"**.
 
-> Para **Wi-Fi**: en la app usa la opción del servidor ADB (`adb tcpip` + conexión
-> por IP), o desde la terminal:
+> Para **Wi-Fi** hay dos caminos en la categoría *Conexión Inalámbrica*:
+>
+> - **Sin cable (Android 11+)**: en el teléfono, *Opciones de desarrollador →
+>   Depuración inalámbrica → Vincular dispositivo con código*; en la app pulsa
+>   **Emparejar** con esa IP:puerto y el código, y luego **Conectar por IP** con
+>   el puerto de depuración inalámbrica.
+> - **Con cable la primera vez**: **Activar puerto TCP/IP**, **IP Wi-Fi del
+>   celular** y **Conectar por IP**. Desde la terminal sería:
 >
 > ```bash
 > adb devices                 # verifica que aparece tu equipo
@@ -182,8 +199,9 @@ sudo eopkg install python python-gobject libgtk-3 libgtk-4 android-tools scrcpy 
 > adb connect <ip-del-teléfono>:5555
 > ```
 >
-> Si tu dispositivo no se detecta, revisa que existan las reglas **udev** de Android
-> (las instala `android-tools`) y reconecta el cable.
+> Si tu dispositivo aparece como *sin permisos USB*, instala las reglas **udev**
+> (`android-udev` en Arch) y reconecta el cable; si aparece *sin autorizar*,
+> acepta el diálogo en el teléfono.
 
 ---
 

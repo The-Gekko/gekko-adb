@@ -1,5 +1,5 @@
 {
-  "version": 1,
+  "version": 2,
   "presets": [
     {
       "id": "samsung_basic",
@@ -25,7 +25,7 @@
       "id": "galaxy_ai",
       "titulo": "Galaxy AI Suite",
       "icono": "🧠",
-      "desc": "AICore, modelo offline, Vision Intelligence, Smart Suggestions.",
+      "desc": "AICore, modelo offline, Vision Intelligence, Smart Suggestions (One UI 6.1+; en modelos anteriores se omiten).",
       "paquetes": [
         "com.samsung.android.aicore",
         "com.samsung.android.offline.languagemodel",
@@ -35,10 +35,11 @@
       ]
     },
     {
-      "id": "knox_fix",
-      "titulo": "Parche Knox Account Fix",
+      "id": "samsung_account_services",
+      "titulo": "Servicios de cuenta Samsung (avanzado)",
       "icono": "🔓",
-      "desc": "MobileService, Cloud y Attestation para neutralizar cierres de sesión.",
+      "desc": "Samsung Experience Service, Samsung Cloud, Authentication Framework, Rubin y Parental Care.",
+      "advertencia": "Rompe la cuenta Samsung, Find My Mobile, Secure Folder y la biometría de Samsung Pass/Pay. Solo si sabes lo que haces.",
       "paquetes": [
         "com.samsung.android.mobileservice",
         "com.samsung.android.scloud",
@@ -49,11 +50,10 @@
     },
     {
       "id": "samsung_stock",
-      "titulo": "App Stock de Samsung",
+      "titulo": "Apps Stock de Samsung",
       "icono": "📱",
-      "desc": "Honeyboard, Galaxy Store, Theme Store, Calendario, Grabadora.",
+      "desc": "Galaxy Store, Theme Store, Calendario, Grabadora de voz. (El teclado Samsung no se toca: usa 'Elegir teclado' antes de quitarlo a mano.)",
       "paquetes": [
-        "com.samsung.android.honeyboard",
         "com.sec.android.app.samsungapps",
         "com.samsung.android.themestore",
         "com.samsung.android.calendar",
@@ -64,27 +64,15 @@
       "id": "google_bloat",
       "titulo": "Google Bloatware",
       "icono": "🌐",
-      "desc": "Duo/Meet, YouTube Music, Drive, Fotos, TV, Google One.",
+      "desc": "Meet/Duo, Google One, Google TV, Fotos, Drive, Bienestar Digital.",
+      "advertencia": "En Android puro/Pixel, Google Fotos es la única galería; Bienestar Digital gestiona el control parental.",
       "paquetes": [
         "com.google.android.apps.tachyon",
         "com.google.android.apps.subscriptions.red",
         "com.google.android.videos",
         "com.google.android.apps.photos",
-        "com.google.android.apps.docs"
-      ]
-    },
-    {
-      "id": "custom_purge",
-      "titulo": "Custom Multi-Purge",
-      "icono": "📦",
-      "desc": "Selección masiva de paquetes pesados de fabricantes.",
-      "paquetes": [
-        "com.samsung.android.spay",
-        "com.samsung.android.samsungpass",
-        "com.facebook.katana",
-        "com.samsung.android.bixby.agent",
-        "com.microsoft.office.officehubrow",
-        "com.samsung.android.aicore"
+        "com.google.android.apps.docs",
+        "com.google.android.apps.wellbeing"
       ]
     },
     {
@@ -103,7 +91,6 @@
         "com.miui.yellowpage",
         "com.miui.bugreport",
         "com.xiaomi.midrop",
-        "com.xiaomi.mi_connect_service",
         "com.miui.miservice",
         "com.miui.voiceassist"
       ]
@@ -112,13 +99,13 @@
       "id": "hyperos_ai",
       "titulo": "HyperOS AI & Extras",
       "icono": "🧠",
-      "desc": "IA, asistente de voz, Mi Pay, Smart Home, Game Center y extras de Xiaomi.",
+      "desc": "IA, asistente de voz, Mi Pay, Smart Home, Game Center, Mi Connect y extras de Xiaomi.",
+      "advertencia": "Mi Connect Service afecta Bluetooth, cast y compartir cercano entre dispositivos Xiaomi.",
       "paquetes": [
         "com.xiaomi.aiasst",
         "com.miui.voicetrigger",
         "com.miui.personalassistant",
         "com.miui.aod",
-        "com.miui.livewallpaper",
         "com.xiaomi.gamecenter",
         "com.xiaomi.vipaccount",
         "com.xiaomi.mipay",
@@ -127,15 +114,14 @@
         "com.xiaomi.mico",
         "com.xiaomi.mi_connect_service",
         "com.miui.globalperipherals",
-        "com.xiaomi.joyose",
-        "com.google.android.apps.wellbeing"
+        "com.xiaomi.joyose"
       ]
     },
     {
       "id": "miui_stock",
       "titulo": "Apps Stock MIUI",
       "icono": "📱",
-      "desc": "Navegador, video, música, notas, clima, calendario, FM y utilidades desinstalables.",
+      "desc": "Navegador, video, música, notas, clima, calendario, FM, fondos animados y utilidades desinstalables.",
       "paquetes": [
         "com.android.browser",
         "com.miui.videoplayer",
