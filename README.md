@@ -13,7 +13,7 @@
 ![GTK](https://img.shields.io/badge/GTK-4%20%E2%89%A5%204.12%20%2F%203.24-4ea5d4?style=flat-square&logo=gtk&logoColor=white)
 ![Python](https://img.shields.io/badge/Python-3.8%2B-3776ab?style=flat-square&logo=python&logoColor=white)
 ![ADB](https://img.shields.io/badge/Android-ADB-3ddc84?style=flat-square&logo=android&logoColor=white)
-![Licencia](https://img.shields.io/badge/Licencia-MIT-yellow?style=flat-square)
+![Licencia](https://img.shields.io/badge/Licencia-zlib%2Flibpng-yellow?style=flat-square)
 
 </div>
 
@@ -38,14 +38,14 @@
 
 ## 🚀 Instalación
 
-Hay dos caminos: **este README** es la vía "1 x 1" (solo Gekko ADB Studio,
-con su propio `install.sh`); si quieres instalar toda la familia Gekko de una
-vez, usa la vía conjunta desde [GekkoApp](#-desde-gekkoapp). No hay releases:
-la app se instala siempre desde la rama `main` de este repositorio.
+Hay **exactamente dos formas** de instalar Gekko ADB Studio: **por curl** o
+**clonando el repositorio**. Las dos ejecutan el mismo `install.sh`, escriben
+las mismas rutas y se desinstalan igual. No hay releases: la app se instala
+siempre desde la rama `main` de este repositorio.
 
-> ⚠️ **Elige una sola vía por proyecto.** Para Gekko ADB Studio ambas vías
-> escriben las mismas rutas, así que la última que ejecutes gana; para cambiar
-> de vía, desinstala primero con la misma con la que instalaste.
+> ⚠️ **Elige una sola vía.** Como las dos escriben las mismas rutas, la última
+> que ejecutes gana; para cambiar de vía, desinstala primero con la misma con la
+> que instalaste.
 
 ### 📋 Requisitos
 
@@ -55,16 +55,19 @@ la app se instala siempre desde la rama `main` de este repositorio.
   El launcher elige GTK 4 si está disponible y, si no, GTK 3.
 - `adb` (`android-tools`). `scrcpy` para espejo/grabación.
 
-### ⚡ Instalación rápida (Arch / Garuda / Solus)
-
-Un solo comando — el instalador detecta tu distribución por `/etc/os-release`
-y usa su gestor de paquetes:
+En las dos vías el instalador detecta tu distribución por `/etc/os-release` y
+usa su gestor de paquetes:
 
 | Distribución | Gestor |
 |---|---|
 | Arch, Garuda, Manjaro, EndeavourOS, CachyOS y cualquiera con `ID_LIKE=arch` | `pacman` |
 | Solus | `eopkg` |
 | No reconocida | Si existe `pacman` se asume Arch; si existe `eopkg`, Solus; si no hay ninguno, el instalador **se detiene con un error** y te pide instalar las dependencias a mano y volver a ejecutar con `--no-deps` |
+
+### ⚡ Por curl
+
+Un solo comando, sin descargar nada más a mano: el script se baja el código de
+la rama `main` (modo standalone) y lo instala.
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/The-Gekko/gekko-adb/main/install.sh | bash
@@ -81,7 +84,7 @@ curl -fsSL https://raw.githubusercontent.com/The-Gekko/gekko-adb/main/install.sh
 > bash /tmp/gekko-install.sh --no-deps  # sin tocar el gestor de paquetes
 > ```
 
-### 🧑‍💻 Desde el código fuente (desarrollo)
+### 🧑‍💻 Clonando el repositorio
 
 ```bash
 git clone https://github.com/The-Gekko/gekko-adb.git
@@ -111,7 +114,7 @@ El instalador respeta los estándares XDG y **nunca corre como root**:
 | Ruta | Contenido |
 |---|---|
 | `~/.local/bin/gekko-adb` | Launcher (exporta `GEKKO_ADB_PROJECT_DIR` y llama a la app instalada) |
-| `~/.local/share/gekko-adb/app/` | La app: núcleo, tema, frontends GTK 3/4, catálogo, presets, `bin/gekko-adb`, `assets/gekko-adb-512.png` y una copia de `install.sh` |
+| `~/.local/share/gekko-adb/app/` | La app: núcleo, tema, frontends GTK 3/4, catálogo, presets, `bin/gekko-adb`, `assets/gekko-adb-512.png`, el `LICENSE` y una copia de `install.sh` |
 | `~/.local/share/gekko-adb/app.bak.<timestamp>/` | Backup de la versión anterior al reinstalar (se conserva solo el último) |
 | `~/.local/share/applications/com.gekko.adb.desktop` | Desktop entry (`Categories=Development;Debugger;`) |
 | `~/.local/share/icons/hicolor/512x512/apps/gekko-adb.png` | Ícono hicolor |
@@ -139,31 +142,20 @@ Si aún existe el desktop entry legacy `GekkoADB.desktop`, se elimina.
 
 ---
 
-## 🧩 Desde GekkoApp
+## 🧩 Nota: Gekko ADB dentro de GekkoApp (vía conjunta)
 
 [GekkoApp](https://github.com/The-Gekko/GekkoApp) es el Control Center de la
-familia Gekko (Rust + Tauri): la vía **"todo en uno"** para instalar y
-desinstalar Gekko ADB Studio junto al resto de módulos. Qué hace exactamente:
-
-1. Instala los paquetes del sistema. En **Arch**: `git python python-gobject
-   gtk3 gtk4 android-tools android-udev scrcpy glib2 xdg-utils xdg-user-dirs
-   curl`. En **Solus**: `git python3 python-gobject libgtk-3 libgtk-4
-   android-tools scrcpy glib2 xdg-utils xdg-user-dirs curl`.
-2. Clona `The-Gekko/gekko-adb` (rama `main`, HEAD por HTTPS; no hay manifiesto
-   ni SHA-256 que verificar) en `~/.cache/gekkoapp/gekko-adb` (o lo actualiza si ya
-   existe).
-3. Ejecuta `install.sh --no-deps --assume-yes` de ese clon: la app queda
-   instalada exactamente como con este README, en las mismas rutas.
-4. En Arch recarga udev (`udevadm control --reload-rules && udevadm trigger`,
-   con `sudo`) si existe `/usr/lib/udev/rules.d/51-android.rules`.
-
-La desinstalación desde el mismo Control Center elimina `~/.local/bin/gekko-adb`,
-el desktop entry `com.gekko.adb.desktop` (y los legacy `GekkoADB.desktop` y
-`org.thegekko.gekko_adb.desktop`), el metainfo, el ícono hicolor,
-`~/.local/share/gekko-adb` (app, backups y el `.env` de instalaciones antiguas)
-y el clon `~/.cache/gekkoapp/gekko-adb`; **conserva** `~/.config/gekko-adb` y
-`~/.local/state/gekko-adb/logs`. Los paquetes del sistema que GekkoApp instaló
-con `sudo` no se desinstalan.
+familia Gekko (Rust + Tauri) y puede instalar y desinstalar Gekko ADB Studio
+junto al resto de módulos. **No es una tercera forma de instalar este
+proyecto**: por dentro instala los paquetes del sistema, clona
+`The-Gekko/gekko-adb` (rama `main`, HEAD por HTTPS) en
+`~/.cache/gekkoapp/gekko-adb` y ejecuta el `install.sh --no-deps --assume-yes`
+de ese clon, así que la app queda en las mismas rutas que con las dos vías de
+arriba (en Arch recarga además las reglas udev de `android-udev`, que con
+`--no-deps` el instalador no toca). Su desinstalación borra lo mismo que
+`install.sh --uninstall` —más los desktop entries legacy y el clon en caché— y
+también **conserva** `~/.config/gekko-adb` y `~/.local/state/gekko-adb/logs`.
+Los pasos están en el README de GekkoApp.
 
 ---
 
@@ -307,17 +299,18 @@ por si quieres hacerlo a mano o saber qué necesita:
 | `glib2` | `glib2` | Librerías base del entorno GTK |
 | `xdg-utils` | `xdg-utils` | Integración con el escritorio |
 | `xdg-user-dirs` | `xdg-user-dirs` | Detecta `~/Descargas`, `~/Imágenes`… según tu idioma (sin él la app usa `$HOME/Descargas` o `$HOME/Downloads` como respaldo) |
-| `curl` | `curl` | Solo para el modo por un comando / standalone (descarga las fuentes); la app no lo usa |
+| `curl` | `curl` | Solo para la vía por curl / modo standalone (descarga las fuentes); la app no lo usa |
 | `matugen` *(opcional)* | — (no está en los repos) | Tema dinámico sincronizado con tu wallpaper |
 
-Instalación manual (Arch/Garuda):
+Instalación manual de las dependencias (Arch/Garuda):
 
 ```bash
 sudo pacman -S --needed python python-gobject gtk3 gtk4 android-tools android-udev scrcpy glib2 xdg-utils xdg-user-dirs curl
 sudo pacman -S matugen   # opcional
 ```
 
-Instalación manual (Solus; ahí `python` es Python 2, el intérprete es `python3`):
+Instalación manual de las dependencias (Solus; ahí `python` es Python 2, el
+intérprete es `python3`):
 
 ```bash
 sudo eopkg install python3 python-gobject libgtk-3 libgtk-4 android-tools scrcpy glib2 xdg-utils xdg-user-dirs curl
@@ -363,8 +356,8 @@ sudo eopkg install python3 python-gobject libgtk-3 libgtk-4 android-tools scrcpy
 
 ## 📄 Licencia
 
-Este proyecto se distribuye bajo la licencia **MIT** — ver [`LICENSE`](LICENSE).
-Copyright (c) 2026 The-Gekko.
+Este proyecto se distribuye bajo la licencia **zlib/libpng** (SPDX: `Zlib`) —
+ver [`LICENSE`](LICENSE). Copyright (c) 2026 The-Gekko.
 
 ---
 

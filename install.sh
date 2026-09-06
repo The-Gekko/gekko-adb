@@ -377,8 +377,10 @@ install_core() {
     # Cada copia se comprueba: 'set -e' no actúa dentro de 'if ! install_core'.
     mkdir -p "$INSTALL_DIR/bin" "$INSTALL_DIR/assets" || return 1
     local f
+    # LICENSE viaja con las fuentes: la licencia zlib (cláusula 3) exige que su
+    # aviso acompañe a cualquier distribución del código, y esto instala el código.
     for f in gekko_adb_core.py gekko_adb_theme.py gekko-adb-gtk4.py gekko-adb-gtk3.py \
-             adb_commands.json debloat_presets.json install.sh; do
+             adb_commands.json debloat_presets.json install.sh LICENSE; do
         cp "$SRC_DIR/$f" "$INSTALL_DIR/$f" || { fail "Falta $f en las fuentes."; return 1; }
     done
     cp "$SRC_DIR/bin/gekko-adb" "$INSTALL_DIR/bin/gekko-adb" || { fail "Falta bin/gekko-adb."; return 1; }
@@ -439,7 +441,7 @@ cat > "$METAINFO_FILE" <<EOF
 <component type="desktop-application">
   <id>com.gekko.adb</id>
   <metadata_license>CC0-1.0</metadata_license>
-  <project_license>MIT</project_license>
+  <project_license>Zlib</project_license>
   <name>Gekko ADB Studio</name>
   <summary>Master Suite de control ADB para Linux</summary>
   <description>
