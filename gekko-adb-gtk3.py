@@ -8,7 +8,7 @@ No importar el frontend GTK 4 aquí.
 from gi import require_version
 require_version('Gtk', '3.0')
 require_version('Gdk', '3.0')
-from gi.repository import Gdk, Gio, GLib, Gtk
+from gi.repository import Gdk, Gio, GLib, Gtk, Pango
 
 import datetime
 import os
@@ -24,7 +24,10 @@ from gekko_adb_core import (
     CommandWorker,
     cargar_config,
     guardar_config,
+    compatibilidad,
+    es_lectura,
     load_catalogo,
+    necesita_confirmacion,
     preset_buttons,
     validar_campos,
     build_valores,
@@ -58,6 +61,9 @@ class GekkoAdbGtk3App(Gtk.Application):
         self._monitor = None
         self._monitor_source = 0
         self._workers = set()
+        # Worker al que apunta el botón Cancelar (None = nada largo en curso).
+        self._cancelando = None
+        self._cancel_btn = None
         self._native_dialogs = set()
         self._dashboard_widgets = {}
         self._conn_pill_label = None
@@ -315,6 +321,13 @@ class GekkoAdbGtk3App(Gtk.Application):
         if spec.get('advertencia'):
             aviso = Gtk.Label(label=f"⚠ {spec['advertencia']}", xalign=0, wrap=True)
             css(aviso, 'card-warn')
+            # El FlowBox es homogéneo: sin acotar, la advertencia más larga de la
+            # categoría estiraría TODAS las tarjetas. Se ven dos líneas y el texto
+            # íntegro queda en el tooltip y en el diálogo de confirmación.
+            aviso.set_max_width_chars(40)
+            aviso.set_lines(2)
+            aviso.set_ellipsize(Pango.EllipsizeMode.END)
+            aviso.set_tooltip_text(spec['advertencia'])
             card.pack_start(aviso, False, False, 0)
 
         if spec.get('especial') == 'terminal':
@@ -325,13 +338,31 @@ class GekkoAdbGtk3App(Gtk.Application):
             btn = Gtk.Button(label='▶  Ejecutar')
             if spec.get('peligro'):
                 css(btn, 'peligro-btn')
-            elif spec.get('warn'):
+            elif not es_lectura(spec):
+                # Naranja para todo lo que cambia algo en el móvil sin ser
+                # destructivo: antes esta rama miraba una clave 'warn' que no
+                # usaba ningún comando, así que el estilo estaba muerto.
                 css(btn, 'warn-btn')
             else:
                 css(btn, 'cmd-btn')
             btn.connect('clicked', self._on_command, spec)
+            self._marcar_compatibilidad(card, btn, spec)
         card.pack_start(btn, False, False, 0)
         return card
+
+    def _marcar_compatibilidad(self, card, btn, spec):
+        """Atenúa el botón y explica por qué si el móvil conectado no lo admite.
+
+        Sin dispositivo no se marca nada: un aviso en falso es peor que ninguno,
+        porque el usuario deja de hacer caso a los avisos.
+        """
+        ok, motivo = compatibilidad(spec, getattr(self, '_device_info', None))
+        card.gekko_spec = spec
+        card.gekko_btn = btn
+        btn.set_sensitive(ok)
+        if not ok and motivo:
+            btn.set_tooltip_text(motivo)
+            card.set_tooltip_text(motivo)
 
     # --------------------------------------------------------------- console
     def _build_console(self):
@@ -345,10 +376,35 @@ class GekkoAdbGtk3App(Gtk.Application):
         t = Gtk.Label(label='📜 Registro de ejecución en tiempo real', xalign=0)
         css(t, 'console-title')
         t.set_hexpand(True)
+        # Buscar y guardar: por aquí pasan salidas de miles de líneas
+        # ('dumpsys batterystats', 'service list', 'settings list') y sin esto
+        # el panel solo servía para mirarlas pasar.
+        self._buscar_entry = Gtk.Entry()
+        self._buscar_entry.set_placeholder_text('Buscar en el registro…')
+        self._buscar_entry.set_width_chars(22)
+        self._buscar_entry.connect('activate', self._on_buscar)
+        cancel = Gtk.Button(label='⛔ Cancelar')
+        css(cancel, 'peligro-btn')
+        cancel.connect('clicked', self._on_cancelar)
+        # Oculto por defecto: los comandos duran milisegundos y un botón
+        # parpadeando en cada clic sería peor que no tenerlo. Solo aparece
+        # cuando uno se alarga (ver _vigilar_lento).
+        cancel.set_visible(False)
+        self._cancel_btn = cancel
+        buscar_btn = Gtk.Button(label='Buscar')
+        css(buscar_btn, 'cmd-btn')
+        buscar_btn.connect('clicked', self._on_buscar)
+        guardar = Gtk.Button(label='Guardar…')
+        css(guardar, 'cmd-btn')
+        guardar.connect('clicked', self._on_guardar_consola)
         clear = Gtk.Button(label='Limpiar')
         css(clear, 'cmd-btn')
         clear.connect('clicked', self._on_clear_console)
         head.pack_start(t, True, True, 0)
+        head.pack_start(cancel, False, False, 0)
+        head.pack_start(self._buscar_entry, False, False, 0)
+        head.pack_start(buscar_btn, False, False, 0)
+        head.pack_start(guardar, False, False, 0)
         head.pack_start(clear, False, False, 0)
         box.pack_start(head, False, False, 0)
 
@@ -414,6 +470,76 @@ class GekkoAdbGtk3App(Gtk.Application):
         self._apply_theme(self._theme)
         self._setup_theme_monitor()
 
+    # Un comando normal dura milisegundos; solo los largos (recompilar una app,
+    # bugreport, screenrecord, esperar dispositivo) merecen ofrecer cancelación.
+    SEGUNDOS_PARA_OFRECER_CANCELAR = 2
+
+    def _vigilar_lento(self, worker):
+        """Enseña el botón Cancelar si el comando sigue vivo pasados unos segundos."""
+        def _comprobar():
+            if worker in self._workers and worker.is_alive():
+                self._cancelando = worker
+                self._cancel_btn.set_visible(True)
+            return False
+        GLib.timeout_add_seconds(self.SEGUNDOS_PARA_OFRECER_CANCELAR, _comprobar)
+
+    def _ocultar_cancelar(self, worker):
+        if self._cancelando is worker:
+            self._cancelando = None
+            self._cancel_btn.set_visible(False)
+
+    def _on_cancelar(self, *_a):
+        worker = self._cancelando
+        if worker is None:
+            return
+        self._log('Cancelando el comando en curso…')
+        worker.cancel()
+
+    def _texto_consola(self):
+        b = self._console_buf
+        return b.get_text(b.get_start_iter(), b.get_end_iter(), False)
+
+    def _on_buscar(self, *_a):
+        """Va a la siguiente coincidencia y la deja seleccionada y a la vista."""
+        texto = self._buscar_entry.get_text().strip()
+        if not texto:
+            return
+        buf = self._console_buf
+        desde = buf.get_iter_at_mark(buf.get_insert())
+        hit = desde.forward_search(texto, Gtk.TextSearchFlags.CASE_INSENSITIVE, None)
+        if not hit:
+            hit = buf.get_start_iter().forward_search(
+                texto, Gtk.TextSearchFlags.CASE_INSENSITIVE, None)
+        if not hit:
+            self._log(f'Sin coincidencias de «{texto}» en el registro.')
+            return
+        ini, fin = hit
+        buf.select_range(ini, fin)
+        self._console_view.scroll_to_iter(ini, 0.1, False, 0, 0)
+
+    def _on_guardar_consola(self, *_a):
+        """GTK3: FileChooserNative con show()+response, nunca run() (ver test)."""
+        dlg = Gtk.FileChooserNative.new('Guardar el registro', self.win,
+                                        Gtk.FileChooserAction.SAVE, 'Guardar', 'Cancelar')
+        dlg.set_current_name(
+            f'gekko-adb-{datetime.datetime.now().strftime("%Y%m%d_%H%M%S")}.log')
+        dlg.connect('response', self._on_guardar_listo)
+        self._guardar_dlg = dlg
+        dlg.show()
+
+    def _on_guardar_listo(self, dlg, resp):
+        ruta = dlg.get_filename() if resp == Gtk.ResponseType.ACCEPT else None
+        dlg.destroy()
+        self._guardar_dlg = None
+        if not ruta:
+            return                      # el usuario canceló: no es un error
+        try:
+            with open(ruta, 'w', encoding='utf-8') as f:
+                f.write(self._texto_consola())
+            self._log(f'Registro guardado en {ruta}')
+        except OSError as e:
+            self._log(f'No se pudo guardar el registro: {e}')
+
     def _on_clear_console(self, _btn):
         self._console_buf.set_text('Consola limpiada.')
 
@@ -441,7 +567,10 @@ class GekkoAdbGtk3App(Gtk.Application):
             pass
 
     def _run_spec(self, spec, valores=None, flags=None):
-        if spec.get('confirmar'):
+        # El criterio lo pone el núcleo, no cada interfaz: así GTK3 y GTK4
+        # preguntan exactamente en los mismos casos, y una acción crítica
+        # confirma aunque el comando del catálogo se olvidara de pedirlo.
+        if necesita_confirmacion(spec):
             self._confirm_dialog(spec, valores, flags)
             return
         self._launch(spec, valores, flags)
@@ -458,10 +587,12 @@ class GekkoAdbGtk3App(Gtk.Application):
         worker = CommandWorker(spec, valores, flags, on_done=_on_done, on_error=_on_error)
         self._workers.add(worker)
         worker.start()
+        self._vigilar_lento(worker)
         return worker
 
     def _on_worker_done(self, spec, result, worker):
         self._workers.discard(worker)
+        self._ocultar_cancelar(worker)
         out = result.get('stdout', '')
         err = result.get('stderr', '')
         extra = result.get('path', '')
@@ -487,6 +618,7 @@ class GekkoAdbGtk3App(Gtk.Application):
 
     def _on_worker_error(self, spec, error, worker):
         self._workers.discard(worker)
+        self._ocultar_cancelar(worker)
         self._log(f'✘ {spec.get("titulo") or spec.get("id", "")}: {error}', kind='error')
         return False
 

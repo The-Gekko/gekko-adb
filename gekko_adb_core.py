@@ -14,6 +14,7 @@ import os
 import re
 import shlex
 import shutil
+import signal
 import subprocess
 import sys
 import threading
@@ -134,21 +135,110 @@ def _text(v):
     return v
 
 
-def run(cmd_args, timeout=30):
-    """Ejecuta un proceso y devuelve {'success', 'stdout', 'stderr'}."""
+# Proceso en marcha de cada hilo, para poder cancelar desde la interfaz un
+# comando largo (recompilar una app son minutos; bugreport y screenrecord
+# tampoco son instantáneos). La clave es el ident del hilo que llamó a run():
+# CommandWorker.cancel() busca ahí el proceso de SU hilo y lo termina, así que
+# cancelar un comando nunca puede matar el de otro.
+_procesos_en_curso = {}
+_procesos_lock = threading.Lock()
+_hilos_cancelados = set()
+
+
+def _registrar_proceso(proc):
+    with _procesos_lock:
+        _procesos_en_curso[threading.get_ident()] = proc
+
+
+def _olvidar_proceso():
+    with _procesos_lock:
+        _procesos_en_curso.pop(threading.get_ident(), None)
+
+
+def cancelar_hilo(ident):
+    """Termina el proceso que esté ejecutando ese hilo. True si había alguno.
+
+    Marca además el hilo como cancelado para que el resultado salga como
+    cancelado y no como un fallo real. Es seguro llamarla cuando el proceso ya
+    terminó: entonces no hay nada que matar y devuelve False.
+    """
+    with _procesos_lock:
+        _hilos_cancelados.add(ident)
+        proc = _procesos_en_curso.get(ident)
+    if proc is None:
+        return False
+    # Se mata el GRUPO entero, no solo el proceso: 'adb shell <algo largo>' deja
+    # hijos, y matando únicamente al padre esos hijos siguen vivos con el pipe
+    # abierto, así que communicate() se quedaría esperando para siempre.
+    if not _matar_grupo(proc, signal.SIGTERM):
+        return False
     try:
-        res = subprocess.run(cmd_args, capture_output=True, text=True, encoding='utf-8',
-                             errors='replace', stdin=subprocess.DEVNULL, timeout=timeout)
-        return {'success': res.returncode == 0,
-                'stdout': res.stdout.strip(), 'stderr': res.stderr.strip()}
+        proc.wait(timeout=2)
+    except Exception:
+        # No murió por las buenas: adb y scrcpy a veces ignoran SIGTERM.
+        _matar_grupo(proc, signal.SIGKILL)
+    return True
+
+
+def _matar_grupo(proc, sig):
+    """Envía la señal al grupo del proceso, con el propio proceso como respaldo."""
+    try:
+        os.killpg(os.getpgid(proc.pid), sig)
+        return True
+    except (ProcessLookupError, PermissionError, OSError):
+        try:
+            proc.kill() if sig == signal.SIGKILL else proc.terminate()
+            return True
+        except Exception:
+            return False
+
+
+def hilo_cancelado(ident=None):
+    with _procesos_lock:
+        return (threading.get_ident() if ident is None else ident) in _hilos_cancelados
+
+
+def limpiar_cancelado(ident):
+    with _procesos_lock:
+        _hilos_cancelados.discard(ident)
+
+
+def run(cmd_args, timeout=30):
+    """Ejecuta un proceso y devuelve {'success', 'stdout', 'stderr'}.
+
+    Usa Popen en vez de subprocess.run para poder registrar el proceso y
+    cancelarlo desde la interfaz. El valor de retorno, el tiempo de espera y el
+    tratamiento de errores son exactamente los de antes.
+    """
+    proc = None
+    try:
+        # start_new_session pone al proceso en su propio grupo: sin eso, matar a
+        # 'adb' dejaría vivos a sus hijos y communicate() esperaría el pipe abierto.
+        proc = subprocess.Popen(cmd_args, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                stdin=subprocess.DEVNULL, text=True, encoding='utf-8',
+                                errors='replace', start_new_session=True)
+        _registrar_proceso(proc)
+        # Carrera: si cancelaron entre que arrancó el hilo y este registro,
+        # 'cancelar_hilo' no encontró proceso que matar. Se atiende aquí.
+        if hilo_cancelado():
+            _matar_grupo(proc, signal.SIGTERM)
+        try:
+            out, err = proc.communicate(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            out, err = proc.communicate()
+            return {'success': False, 'stdout': _text(out).strip(),
+                    'stderr': (f'Tiempo agotado ({timeout}s)' +
+                               ('\n' + _text(err).strip() if err else ''))}
+        return {'success': proc.returncode == 0,
+                'stdout': _text(out).strip(), 'stderr': _text(err).strip()}
     except FileNotFoundError:
         return _fail(f'No se encontró el ejecutable {cmd_args[0] if cmd_args else "comando"}')
-    except subprocess.TimeoutExpired as e:
-        return {'success': False, 'stdout': _text(e.stdout).strip(),
-                'stderr': (f'Tiempo agotado ({timeout}s)' +
-                           ('\n' + _text(e.stderr).strip() if e.stderr else ''))}
     except Exception as e:
         return _fail(str(e))
+    finally:
+        if proc is not None:
+            _olvidar_proceso()
 
 
 def run_bytes(cmd_args, timeout=60):
@@ -2126,20 +2216,29 @@ class CommandWorker(threading.Thread):
         self._on_done = on_done
         self._on_error = on_error
         self._finished = False
+        self._cancelado = False
+        self._ident = None
         self.result = None
 
-    def run(self):
-        try:
-            result = ejecutar(self.spec, self._valores, self._flags)
-        except Exception as e:
-            if not self._finished:
-                self._finished = True
-                if self._on_error:
-                    try:
-                        self._on_error(e)
-                    except Exception as cb:
-                        log_line(f'on_error falló: {cb!r}', force=True)
-            return
+    def cancel(self):
+        """Cancela el comando en curso. Es seguro llamarla siempre.
+
+        Si el proceso ya terminó no hay nada que matar y no lanza; si aún no ha
+        arrancado, `run()` lo verá al empezar y no llegará a ejecutar nada.
+        """
+        self._cancelado = True
+        ident = self._ident
+        if ident is not None:
+            cancelar_hilo(ident)
+        return True
+
+    @staticmethod
+    def _resultado_cancelado():
+        return {'success': False, 'cancelled': True, 'stdout': '',
+                'stderr': 'Cancelado por el usuario'}
+
+    def _terminar(self, result):
+        """Entrega el único callback terminal del contrato."""
         if self._finished:
             return
         self._finished = True
@@ -2149,6 +2248,35 @@ class CommandWorker(threading.Thread):
                 self._on_done(result)
             except Exception as cb:
                 log_line(f'on_done falló: {cb!r}', force=True)
+
+    def run(self):
+        self._ident = threading.get_ident()
+        limpiar_cancelado(self._ident)
+        # Cancelado entre start() y la primera línea del hilo: no se ejecuta nada.
+        if self._cancelado:
+            self._terminar(self._resultado_cancelado())
+            return
+        try:
+            result = ejecutar(self.spec, self._valores, self._flags)
+        except Exception as e:
+            limpiar_cancelado(self._ident)
+            # Matar el proceso hace que adb salga con error: si veníamos de una
+            # cancelación, eso NO es un fallo real y se informa como cancelado.
+            if self._cancelado:
+                self._terminar(self._resultado_cancelado())
+                return
+            if not self._finished:
+                self._finished = True
+                if self._on_error:
+                    try:
+                        self._on_error(e)
+                    except Exception as cb:
+                        log_line(f'on_error falló: {cb!r}', force=True)
+            return
+        limpiar_cancelado(self._ident)
+        if self._cancelado:
+            result = self._resultado_cancelado()
+        self._terminar(result)
 
 
 def start_command(spec, valores_ui=None, flags_ui=None, on_done=None, on_error=None):
@@ -2173,6 +2301,7 @@ def load_catalogo():
     cats = data.get('categorias')
     if not isinstance(cats, list):
         raise CatalogoError(f'{CATALOGO_FILE}: falta la lista "categorias"')
+    vistos = {}
     for c in cats:
         if not isinstance(c, dict) or 'id' not in c or 'titulo' not in c:
             raise CatalogoError(f'{CATALOGO_FILE}: categoría sin id/titulo: {c!r}')
@@ -2181,7 +2310,178 @@ def load_catalogo():
             if 'id' not in cmd or 'accion' not in cmd:
                 raise CatalogoError(f'{CATALOGO_FILE}: comando sin id/accion en {c["id"]}: {cmd!r}')
             cmd.setdefault('titulo', cmd['id'])
+            if cmd['id'] in vistos:
+                raise CatalogoError(
+                    f'{CATALOGO_FILE}: id de comando duplicado «{cmd["id"]}» '
+                    f'(en «{vistos[cmd["id"]]}» y en «{c["id"]}»)')
+            vistos[cmd['id']] = c['id']
+            _validar_comando(c, cmd)
     return data
+
+
+# Tipos de campo que las DOS interfaces saben pintar (gekko-adb-gtk4.py y
+# gekko-adb-gtk3.py, _build_campo_widget). Uno fuera de esta lista se pintaría
+# como texto plano y el usuario perdería el selector sin enterarse.
+TIPOS_CAMPO = frozenset({'texto', 'numero', 'select', 'paquete',
+                         'archivo', 'archivos', 'carpeta'})
+
+# Acciones que NO cambian nada en el móvil: consultan, listan o se traen algo al
+# PC. El resto se considera que muta, así que una acción nueva nace clasificada
+# como mutante hasta que alguien la declare de lectura a conciencia: el olvido
+# cae del lado seguro, que es justo lo que aquí interesa.
+ACCIONES_LECTURA = frozenset({
+    'appops_get', 'brightness_get', 'bugreport', 'device_info', 'device_ip',
+    'devices', 'dumpsys', 'dumpsys_app', 'dumpsys_package', 'extract_apk',
+    'forward_list', 'game_list', 'get_state', 'getprop', 'help', 'host_features',
+    'ime_list', 'list_packages', 'logcat_read', 'mdns_check', 'mdns_services',
+    'netpolicy', 'overlay_list', 'processes', 'pull', 'pull_merge', 'quick_pull',
+    'reverse_list', 'role_list', 'screenshot', 'scrcpy_list', 'settings_get',
+    'settings_list', 'storage', 'top', 'version', 'wait_for_device',
+})
+
+# De las que mutan, estas pueden dejar el móvil inservible, borrar datos, cortar
+# la propia conexión o tardar minutos. La interfaz exige confirmación para ellas
+# AUNQUE el comando del catálogo se olvide de pedirla: así el hueco no depende de
+# acordarse de escribir "confirmar" en el JSON, que es de donde salieron los
+# botones sin red que encontró la auditoría (pm_disable, settings_put, sideload…).
+# Solo entran las acciones peligrosas SIEMPRE, pasen los argumentos que pasen.
+# Las que dependen del argumento (pm_action vale para «desactivar» y para
+# «reactivar»; svc apaga el Wi-Fi o lo enciende; refresh_rate fija o consulta)
+# se quedan fuera a propósito: forzarlas aquí obligaría a confirmar también su
+# variante inofensiva y volvería insoportable una app que hoy es de un clic.
+# Para esas, la red la pone el propio comando en el JSON y la vigila el test de
+# integridad de test_core.py, que es el que impide que se olvide.
+ACCIONES_CRITICAS = frozenset({
+    'debloat_preset', 'density', 'install', 'install_multi_package',
+    'install_multiple', 'overlay_disable', 'overlay_enable', 'reboot',
+    'remount', 'restore_preset', 'root', 'settings_delete', 'settings_put',
+    'setprop', 'sideload', 'soft_reboot', 'uninstall', 'unroot', 'wm_size',
+})
+
+
+# Compatibilidad declarada por botón: {"requiere": {"sdk": 31, "scrcpy": "3.1"}}
+# «sdk» es la API de Android (12 = 31, 13 = 33, 14 = 34) y «scrcpy» la versión
+# mínima del binario del PC. Decirlo ANTES de pulsar evita el peor caso: un
+# botón que falla con un error de adb que no explica que el móvil es antiguo.
+_scrcpy_ver_cache = {'v': None, 'leido': False}
+
+
+def scrcpy_version():
+    """Versión de scrcpy instalada como tupla (4, 1), o None si no se sabe.
+
+    Se cachea: esto se consulta al pintar cada tarjeta y lanzar scrcpy por cada
+    botón sería absurdo.
+    """
+    if _scrcpy_ver_cache['leido']:
+        return _scrcpy_ver_cache['v']
+    _scrcpy_ver_cache['leido'] = True
+    if shutil.which(SCRCPY_EXEC):
+        res = run([SCRCPY_EXEC, '--version'], timeout=10)
+        m = re.search(r'scrcpy\s+(\d+)\.(\d+)', res.get('stdout', '') or '')
+        if m:
+            _scrcpy_ver_cache['v'] = (int(m.group(1)), int(m.group(2)))
+    return _scrcpy_ver_cache['v']
+
+
+def _ver_tupla(texto):
+    partes = re.findall(r'\d+', str(texto))[:2]
+    return tuple(int(p) for p in partes) if partes else None
+
+
+def compatibilidad(spec, info=None):
+    """Dice si el comando puede funcionar aquí: (compatible, motivo).
+
+    `compatible` es True cuando no hay impedimento conocido y False solo cuando
+    consta que NO va a funcionar. Si falta el dato (sin móvil conectado, o
+    scrcpy sin instalar) devuelve True con el motivo en None: avisar en falso es
+    peor que no avisar, porque el usuario deja de fiarse del aviso.
+    """
+    req = (spec or {}).get('requiere') or {}
+    if not req:
+        return True, None
+    sdk_min = req.get('sdk')
+    if sdk_min:
+        sdk = (info or {}).get('sdk')
+        try:
+            sdk = int(sdk)
+        except (TypeError, ValueError):
+            sdk = None
+        if sdk and sdk < int(sdk_min):
+            return False, (f'Necesita Android {_ANDROID_POR_SDK.get(int(sdk_min), "?")} '
+                           f'(API {sdk_min}) y el móvil tiene API {sdk}')
+    ver_min = req.get('scrcpy')
+    if ver_min:
+        v = scrcpy_version()
+        minimo = _ver_tupla(ver_min)
+        if v and minimo and v < minimo:
+            return False, (f'Necesita scrcpy {ver_min} y hay '
+                           f'{v[0]}.{v[1]} instalado')
+    return True, None
+
+
+# Solo las que hacen falta para los mensajes; el resto sale como '?'.
+_ANDROID_POR_SDK = {29: '10', 30: '11', 31: '12', 32: '12L', 33: '13', 34: '14',
+                    35: '15', 36: '16'}
+
+
+def es_lectura(spec):
+    """True si el comando solo consulta: nunca debe pedir confirmación."""
+    return (spec or {}).get('accion') in ACCIONES_LECTURA
+
+
+def necesita_confirmacion(spec):
+    """Si hay que preguntar antes de ejecutar este comando del catálogo.
+
+    Manda lo que diga el comando, y si no dice nada decide la acción: las
+    críticas confirman por omisión. Un comando puede renunciar a propósito con
+    "confirmar": false, pero entonces es una decisión escrita, no un descuido.
+    """
+    spec = spec or {}
+    if 'confirmar' in spec:
+        return bool(spec['confirmar'])
+    if es_lectura(spec):
+        return False
+    return spec.get('accion') in ACCIONES_CRITICAS
+
+
+def _validar_comando(cat, cmd):
+    """Comprueba un comando del catálogo. Lanza CatalogoError con el sitio exacto.
+
+    Se ejecuta al arrancar y aborta la app a propósito: el catálogo lo controla
+    el proyecto, así que un fallo aquí es un bug que hay que ver de inmediato,
+    no un dato del usuario que convenga tolerar. Cada mensaje dice categoría,
+    comando y campo para poder arreglarlo sin buscar.
+    """
+    donde = f'{CATALOGO_FILE}: {cat["id"]} → {cmd["id"]}'
+    if cmd['accion'] not in _ACTIONS:
+        raise CatalogoError(f'{donde}: acción desconocida «{cmd["accion"]}»')
+    for campo in cmd.get('campos') or []:
+        if not isinstance(campo, dict) or not campo.get('clave'):
+            raise CatalogoError(f'{donde}: campo sin «clave»: {campo!r}')
+        clave = campo['clave']
+        tipo = campo.get('tipo', 'texto')
+        if tipo not in TIPOS_CAMPO:
+            raise CatalogoError(
+                f'{donde} → {clave}: tipo «{tipo}» que las interfaces no saben pintar '
+                f'(admitidos: {", ".join(sorted(TIPOS_CAMPO))})')
+        if tipo != 'select':
+            continue
+        opciones = campo.get('opciones')
+        if not opciones:
+            raise CatalogoError(f'{donde} → {clave}: un select necesita «opciones»')
+        valores = [op.get('valor') for op in opciones]
+        defecto = campo.get('defecto', '')
+        if defecto not in valores:
+            raise CatalogoError(
+                f'{donde} → {clave}: el defecto «{defecto}» no está entre sus opciones '
+                f'({", ".join(repr(v) for v in valores)})')
+        # El fallo que dejaba «Reconectar» y «Listar paquetes → Instaladas» rotos de
+        # fábrica: validar_campos() rechaza el vacío de un campo no opcional, así que
+        # un select con una opción vacía SIEMPRE fallaba al elegirla.
+        if not campo.get('opcional') and any(v in (None, '') for v in valores):
+            raise CatalogoError(
+                f'{donde} → {clave}: tiene una opción de valor vacío pero no es '
+                f'«opcional»: elegirla daría siempre «Falta el valor»')
 
 
 def load_presets():

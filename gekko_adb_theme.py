@@ -151,15 +151,6 @@ button.warn-btn {{
     font-weight: 700;
 }}
 
-button.blue-btn {{
-    background-color: @blue;
-    color: #ffffff;
-    border: 1px solid @blue;
-    border-radius: 8px;
-    padding: 6px 12px;
-    font-weight: 700;
-}}
-
 .console-title {{
     font-weight: 700;
     font-size: 12px;

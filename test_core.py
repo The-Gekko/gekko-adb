@@ -1627,5 +1627,193 @@ class TestConfigYUtilidades(unittest.TestCase):
         self.assertEqual(core.validar_campos(spec, {'a': 'x'}), ['A debe ser un número entero'])
 
 
+class TestValidacionCatalogo(Base):
+    """La validación al cargar: es lo que impide que vuelvan los botones rotos
+    de fábrica (un select obligatorio con opción vacía siempre daba «Falta el
+    valor», y así estuvieron «Reconectar» y «Listar paquetes → Instaladas»)."""
+
+    def _cargar(self, mutar):
+        import copy
+        with open(PROJECT_DIR / 'adb_commands.json', encoding='utf-8') as f:
+            d = json.load(f)
+        mutar(d)
+        bad = Path(TMP) / 'cat_val.json'
+        bad.write_text(json.dumps(d), encoding='utf-8')
+        with mock.patch.object(core, 'CATALOGO_FILE', bad):
+            return core.load_catalogo()
+
+    def _primer_cmd(self, d):
+        return d['categorias'][1]['comandos'][0]
+
+    def test_catalogo_real_es_valido(self):
+        self.assertTrue(core.load_catalogo()['categorias'])
+
+    def test_rechaza_accion_inexistente(self):
+        with self.assertRaises(core.CatalogoError) as e:
+            self._cargar(lambda d: self._primer_cmd(d).update(accion='no_existe'))
+        self.assertIn('acción desconocida', str(e.exception))
+
+    def test_rechaza_id_duplicado(self):
+        def mutar(d):
+            d['categorias'][1]['comandos'][1]['id'] = self._primer_cmd(d)['id']
+        with self.assertRaises(core.CatalogoError) as e:
+            self._cargar(mutar)
+        self.assertIn('duplicado', str(e.exception))
+
+    def test_rechaza_tipo_de_campo_que_nadie_pinta(self):
+        with self.assertRaises(core.CatalogoError) as e:
+            self._cargar(lambda d: self._primer_cmd(d).update(
+                campos=[{'clave': 'x', 'tipo': 'slider'}]))
+        self.assertIn('no saben pintar', str(e.exception))
+
+    def test_rechaza_defecto_fuera_de_opciones(self):
+        with self.assertRaises(core.CatalogoError) as e:
+            self._cargar(lambda d: self._primer_cmd(d).update(
+                campos=[{'clave': 'x', 'tipo': 'select', 'defecto': 'zzz',
+                         'opciones': [{'valor': 'a'}]}]))
+        self.assertIn('no está entre sus opciones', str(e.exception))
+
+    def test_rechaza_select_obligatorio_con_opcion_vacia(self):
+        with self.assertRaises(core.CatalogoError) as e:
+            self._cargar(lambda d: self._primer_cmd(d).update(
+                campos=[{'clave': 'x', 'tipo': 'select', 'defecto': 'a',
+                         'opciones': [{'valor': 'a'}, {'valor': ''}]}]))
+        self.assertIn('Falta el valor', str(e.exception))
+
+    def test_select_con_opcion_vacia_pero_opcional_es_valido(self):
+        self._cargar(lambda d: self._primer_cmd(d).update(
+            campos=[{'clave': 'x', 'tipo': 'select', 'defecto': '', 'opcional': True,
+                     'opciones': [{'valor': ''}, {'valor': 'a'}]}]))
+
+
+class TestRedDeSeguridad(Base):
+    """Que un botón que cambia el móvil no dependa de acordarse de escribir
+    "confirmar" en el JSON."""
+
+    def test_lectura_nunca_confirma(self):
+        cat = core.load_catalogo()
+        malos = [c['id'] for cat_ in cat['categorias'] for c in cat_.get('comandos', [])
+                 if core.es_lectura(c) and core.necesita_confirmacion(c)]
+        self.assertEqual(malos, [], f'botones de lectura pidiendo confirmación: {malos}')
+
+    def test_accion_critica_confirma_aunque_el_json_lo_olvide(self):
+        self.assertTrue(core.necesita_confirmacion({'id': 'x', 'accion': 'sideload'}))
+        self.assertTrue(core.necesita_confirmacion({'id': 'x', 'accion': 'setprop'}))
+
+    def test_se_puede_renunciar_a_proposito(self):
+        self.assertFalse(core.necesita_confirmacion(
+            {'id': 'x', 'accion': 'sideload', 'confirmar': False}))
+
+    def test_integridad_todo_lo_critico_tiene_red(self):
+        cat = core.load_catalogo()
+        sin_red = []
+        for c in cat['categorias']:
+            for cmd in c.get('comandos', []):
+                if cmd['accion'] in core.ACCIONES_CRITICAS and not core.necesita_confirmacion(cmd):
+                    sin_red.append(cmd['id'])
+        self.assertEqual(sin_red, [], f'acciones críticas sin confirmación: {sin_red}')
+
+    def test_toda_accion_usada_esta_clasificada_o_es_mutante(self):
+        # No exige clasificar todo: solo deja constancia de que lo no declarado
+        # como lectura se trata como mutante, que es el lado seguro.
+        cat = core.load_catalogo()
+        for c in cat['categorias']:
+            for cmd in c.get('comandos', []):
+                if cmd['accion'] not in core.ACCIONES_LECTURA:
+                    self.assertFalse(core.es_lectura(cmd))
+
+
+class TestCompatibilidad(Base):
+    """Avisar antes de pulsar, y nunca avisar en falso."""
+
+    def _cmd(self, cid):
+        for c in core.load_catalogo()['categorias']:
+            for x in c.get('comandos', []):
+                if x['id'] == cid:
+                    return x
+        raise AssertionError(cid)
+
+    def test_sin_requisitos_siempre_compatible(self):
+        self.assertEqual(core.compatibilidad({'id': 'x'}, {'sdk': 21}), (True, None))
+
+    def test_sdk_insuficiente_se_marca_con_motivo(self):
+        ok, motivo = core.compatibilidad(self._cmd('perf_game_mode'), {'sdk': 30})
+        self.assertFalse(ok)
+        self.assertIn('Android 12', motivo)
+
+    def test_sdk_suficiente_es_compatible(self):
+        self.assertTrue(core.compatibilidad(self._cmd('perf_game_mode'), {'sdk': 36})[0])
+
+    def test_sin_dispositivo_no_marca_nada(self):
+        # Un aviso en falso es peor que no avisar: el usuario deja de creerlos.
+        for cid in ('perf_game_mode', 'role_holders', 'game_virtual'):
+            self.assertTrue(core.compatibilidad(self._cmd(cid), {})[0], cid)
+            self.assertTrue(core.compatibilidad(self._cmd(cid), None)[0], cid)
+
+    def test_scrcpy_viejo_se_marca(self):
+        with mock.patch.object(core, 'scrcpy_version', return_value=(2, 4)):
+            ok, motivo = core.compatibilidad(self._cmd('game_pad'), {'sdk': 36})
+        self.assertFalse(ok)
+        self.assertIn('3.1', motivo)
+
+    def test_scrcpy_desconocido_no_marca(self):
+        with mock.patch.object(core, 'scrcpy_version', return_value=None):
+            self.assertTrue(core.compatibilidad(self._cmd('game_pad'), {'sdk': 36})[0])
+
+
+class TestCancelacion(Base):
+    """Cancelar un comando largo, con sus tres carreras."""
+
+    SPEC = {'id': 'lento', 'titulo': 'lento', 'accion': 'custom',
+            'args': {'command': 'shell sleep 30'}}
+
+    def _adb_lento(self):
+        p = Path(TMP) / 'adb-lento'
+        p.write_text('#!/bin/bash\n'
+                     'case "$1" in devices) echo "List of devices attached";'
+                     ' echo "SERIAL1  device"; exit 0;; esac\n'
+                     'sleep 30\n')
+        p.chmod(0o755)
+        return p
+
+    def test_cancelar_durante_devuelve_cancelado(self):
+        with mock.patch.object(core, 'ADB_EXEC', str(self._adb_lento())):
+            hechos = []
+            w = core.start_command(self.SPEC, on_done=hechos.append)
+            time.sleep(1.0)
+            w.cancel()
+            w.join(timeout=15)
+        self.assertFalse(w.is_alive())
+        self.assertEqual(len(hechos), 1, 'el contrato es UN solo callback terminal')
+        self.assertTrue(hechos[0].get('cancelled'))
+        self.assertFalse(hechos[0].get('success'))
+
+    def test_cancelar_antes_de_arrancar(self):
+        with mock.patch.object(core, 'ADB_EXEC', str(self._adb_lento())):
+            hechos = []
+            w = core.start_command(self.SPEC, on_done=hechos.append)
+            w.cancel()
+            w.join(timeout=15)
+        self.assertFalse(w.is_alive())
+        self.assertEqual(len(hechos), 1)
+        self.assertTrue(hechos[0].get('cancelled'))
+
+    def test_cancelar_despues_de_terminar_no_lanza(self):
+        hechos = []
+        w = core.start_command({'id': 'v', 'titulo': 'v', 'accion': 'version'},
+                               on_done=hechos.append)
+        w.join(timeout=15)
+        w.cancel()          # no debe lanzar ni disparar un segundo callback
+        self.assertEqual(len(hechos), 1)
+
+    def test_no_deja_procesos_registrados(self):
+        with mock.patch.object(core, 'ADB_EXEC', str(self._adb_lento())):
+            w = core.start_command(self.SPEC, on_done=lambda r: None)
+            time.sleep(0.8)
+            w.cancel()
+            w.join(timeout=15)
+        self.assertEqual(core._procesos_en_curso, {})
+
+
 if __name__ == '__main__':
     unittest.main()

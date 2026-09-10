@@ -223,6 +223,36 @@ gekko-adb --diagnostics       # adb, scrcpy, GTK y dispositivos, sin abrir la ap
 | `GEKKO_ADB_PYTHON` | Intérprete a usar (por defecto `python3`) |
 | `GEKKO_ADB_PROJECT_DIR` | Carpeta con el código (el launcher instalado la exporta a `~/.local/share/gekko-adb/app`) |
 
+### En el panel de resultados
+
+El registro de abajo recibe salidas de miles de líneas (`dumpsys batterystats`,
+`service list`, `settings list`), así que la cabecera trae **Buscar** —salta a
+la coincidencia siguiente y vuelve al principio al acabar— y **Guardar…**, que
+vuelca todo el registro a un archivo de texto.
+
+### Cuando un comando se alarga
+
+La mayoría de los botones tardan milisegundos, pero **recompilar una app** son
+minutos, y `bugreport`, `screenrecord` o *esperar dispositivo* tampoco son
+inmediatos. Si un comando pasa de un par de segundos aparece **⛔ Cancelar** en
+la cabecera del registro: corta el proceso y todo su árbol de hijos, y el
+resultado se marca como *cancelado*, no como un error. El botón se esconde solo
+al terminar, así que no estorba en el uso normal.
+
+### Botones que tu móvil no admite
+
+Los botones con un requisito declarado —el **Modo de juego** pide Android 12,
+la **pantalla virtual** pide Android 14 y scrcpy 3.0, el **mando** pide scrcpy
+3.1— salen **atenuados** cuando el móvil conectado no llega, y el motivo exacto
+aparece al pasar el ratón por encima («Necesita Android 12 (API 31) y el móvil
+tiene API 30»). Sin móvil conectado no se marca nada: avisar en falso sería
+peor que no avisar.
+
+Además, los botones que **cambian algo** en el teléfono se distinguen del resto
+por el color, y los realmente destructivos piden confirmación. Esa confirmación
+la decide el núcleo por la acción, no una marca escrita a mano en el catálogo,
+así que un botón nuevo peligroso no puede olvidarse de pedirla.
+
 ---
 
 ## 🕹️ Gaming: jugar en el PC con los juegos del móvil
@@ -413,12 +443,12 @@ tests/fixtures/        Salidas reales de dumpsys battery, wm size/density y navi
 ## 🧪 Tests
 
 ```bash
-python3 -m unittest discover -s . -p 'test_*.py'   # 180 tests: core + tema + GTK 3 (173) y GTK 4 (7, se saltan aquí)
+python3 -m unittest discover -s . -p 'test_*.py'   # 202 tests: core + tema + GTK 3 (195) y GTK 4 (7, se saltan aquí)
 python3 -m unittest test_ui_gtk4                   # 7 tests GTK 4, en su propio proceso
 ```
 
-GTK 3 y GTK 4 no pueden cargarse en el mismo proceso: `discover` ejecuta 180
-tests y termina en `OK (skipped=7)` — 173 de core (159) + tema (9) + GTK 3 (5)
+GTK 3 y GTK 4 no pueden cargarse en el mismo proceso: `discover` ejecuta 202
+tests y termina en `OK (skipped=7)` — 195 de core (181) + tema (9) + GTK 3 (5)
 más los 7 de GTK 4, que se saltan en ese proceso— y `test_ui_gtk4` se ejecuta
 aparte (7). Los tests de UI usan un display real: sin `DISPLAY` ni
 `WAYLAND_DISPLAY` se saltan.
