@@ -8,7 +8,6 @@ dispositivo, errores) se elige escribiendo un archivo de escenario.
 """
 import json
 import os
-import shutil
 import sys
 import tempfile
 import threading
@@ -34,6 +33,7 @@ FIXTURES = PROJECT_DIR / 'tests' / 'fixtures'
 # importa todos antes de ejecutar): cada test restablece su propio entorno.
 ENV = {k: os.environ[k] for k in ('HOME', 'XDG_CONFIG_HOME', 'XDG_STATE_HOME', 'XDG_CACHE_HOME')}
 ARGV_LOG = Path(TMP) / 'argv.log'
+SCRCPY_LOG = Path(TMP) / 'scrcpy_argv.log'
 SCENARIO = Path(TMP) / 'scenario'
 SCENARIO.write_text('default')
 
@@ -108,6 +108,8 @@ case "${args[0]}" in
                 exit 0;;
             settings)
                 if [[ "${args[2]}" == "get" && "${args[4]}" == "navigation_mode" ]]; then echo "2"; fi
+                # Tal cual responde el móvil real cuando no hay tasa forzada.
+                if [[ "${args[2]}" == "get" && "${args[4]}" == *refresh_rate ]]; then echo "null"; fi
                 if [[ "${args[2]}" == "get" && "${args[4]}" == "sms_default_application" ]]; then echo "com.samsung.android.messaging"; fi
                 if [[ "${args[2]}" == "put" && "$scen" == "settings_fail" ]]; then echo "error"; exit 1; fi
                 exit 0;;
@@ -122,6 +124,21 @@ case "${args[0]}" in
                 if [[ "${args[2]}" == "package" && "${args[3]}" == "uninstall" ]]; then echo "Success"; fi
                 if [[ "${args[2]}" == "package" && "${args[3]}" == "install-existing" ]]; then echo "Package ${args[4]} installed for user: 0"; fi
                 if [[ "${args[2]}" == "overlay" ]]; then echo ""; fi
+                # 'cmd game' rechaza las apps que no son juego POR STDOUT y saliendo
+                # con código 0: el mensaje es literal el del móvil del usuario.
+                if [[ "${args[2]}" == "game" && "$scen" == "game_not_game" ]]; then
+                    echo "Package ${args[-1]} is not of game type, to use the game mode commands, it must specify game category in the manifest as android:appCategory=\"game\""
+                    exit 0
+                fi
+                if [[ "${args[2]}" == "appops" && "${args[3]}" == "get" && "$scen" == "appops" ]]; then
+                    echo "SYSTEM_ALERT_WINDOW: allow"; echo "RUN_IN_BACKGROUND: ignore"
+                fi
+                if [[ "${args[2]}" == "display" && "${args[3]}" == "get-brightness" ]]; then echo "42"; fi
+                if [[ "${args[2]}" == "netpolicy" && "${args[3]}" == "get" ]]; then echo "Restrict background status: enabled"; fi
+                # dexopt fallido: también sale con código 0 y solo se nota en el texto.
+                if [[ "${args[2]}" == "package" && "${args[3]}" == "compile" && "$scen" == "compile_fail" ]]; then
+                    echo "Error: Package ${args[-1]} not found"; exit 0
+                fi
                 exit 0;;
             pm)
                 if [[ "${args[2]}" == "list" ]]; then
@@ -149,18 +166,56 @@ esac
 '''
 
 
-def _write_fake(path):
-    Path(path).write_text(FAKE_ADB_SCRIPT, encoding='utf-8')
+FAKE_SCRCPY_SCRIPT = r'''#!/bin/bash
+# scrcpy falso: registra el argv en SU PROPIO log (así los tests de adb siguen
+# viendo solo llamadas a adb) y responde según el escenario.
+#
+# Sale al instante, y eso es deliberado: run_scrcpy() espera 1,5 s y, si el
+# proceso ya murió con código 0, devuelve _ok('Scrcpy terminó: …') en vez de
+# _ok('Scrcpy lanzado: …'). Los tests afirman ese comportamiento real; el
+# escenario 'scrcpy_alive' deja el proceso vivo para probar la otra rama sin
+# tocar el núcleo.
+printf '%s\n' "$(printf '%s\x1f' "$@")" >> "$GEKKO_TEST_SCRCPY_LOG"
+scen="$(cat "$GEKKO_TEST_SCENARIO" 2>/dev/null || echo default)"
+case "$scen" in
+    scrcpy_fail) echo "ERROR: Could not find encoder 'c2.nope.encoder'" >&2; exit 1;;
+    scrcpy_alive) sleep 4; exit 0;;
+esac
+for a in "$@"; do
+    case "$a" in
+        --list-encoders)
+            # El banner sale por stderr y el listado por stdout, como el scrcpy real.
+            echo "scrcpy 4.1 <https://github.com/Genymobile/scrcpy>" >&2
+            echo "List of video encoders:"
+            echo "    --video-codec=h264 --video-encoder=c2.android.avc.encoder"
+            echo "    --video-codec=h265 --video-encoder=c2.android.hevc.encoder"
+            exit 0;;
+        --list-apps)
+            echo "scrcpy 4.1 <https://github.com/Genymobile/scrcpy>" >&2
+            echo "List of apps:"
+            echo " * Ajustes                       [com.android.settings]"
+            echo " - Genshin Impact                [com.miHoYo.GenshinImpact]"
+            exit 0;;
+    esac
+done
+exit 0
+'''
+
+
+def _write_fake(path, script=FAKE_ADB_SCRIPT):
+    Path(path).write_text(script, encoding='utf-8')
     os.chmod(path, 0o755)
     return path
 
 
 FAKE_ADB = _write_fake(os.path.join(TMP, 'fake-adb'))
+FAKE_SCRCPY = _write_fake(os.path.join(TMP, 'fake-scrcpy'), FAKE_SCRCPY_SCRIPT)
 os.environ['GEKKO_ADB_EXECUTABLE'] = FAKE_ADB
 os.environ['GEKKO_TEST_ARGV_LOG'] = str(ARGV_LOG)
+os.environ['GEKKO_TEST_SCRCPY_LOG'] = str(SCRCPY_LOG)
 os.environ['GEKKO_TEST_SCENARIO'] = str(SCENARIO)
 os.environ['GEKKO_TEST_FIXTURES'] = str(FIXTURES)
-os.environ['GEKKO_SCRCPY_EXECUTABLE'] = shutil.which('true') or '/bin/true'
+os.environ['GEKKO_SCRCPY_EXECUTABLE'] = FAKE_SCRCPY
 os.environ['GEKKO_ADB_BASE'] = str(PROJECT_DIR)
 
 import gekko_adb_core as core  # noqa: E402
@@ -180,7 +235,10 @@ def calls():
         return []
     out = []
     for line in ARGV_LOG.read_text(encoding='utf-8').splitlines():
-        out.append([a for a in line.split('\x1f') if a != ''][:])
+        # El separador va SIEMPRE al final, así que se quita solo ese con [:-1].
+        # Filtrar todos los vacíos borraría también los argumentos vacíos INTERIORES,
+        # que es justo la regresión que estos tests vigilan (p. ej. un '--fps ''').
+        out.append(line.split('\x1f')[:-1])
     return out
 
 
@@ -194,15 +252,39 @@ def non_devices(cs):
     return [c for c in cs if c[:1] != ['devices'] and c[:3] != ['devices', '-l']]
 
 
+def scrcpy_calls():
+    """Lista de argv (listas) registrados por el scrcpy falso desde el último reset."""
+    if not SCRCPY_LOG.exists():
+        return []
+    # Igual que calls(): [:-1] quita el separador final y conserva los vacíos interiores.
+    return [line.split('\x1f')[:-1]
+            for line in SCRCPY_LOG.read_text(encoding='utf-8').splitlines()]
+
+
+def reset_scrcpy_calls():
+    if SCRCPY_LOG.exists():
+        SCRCPY_LOG.unlink()
+
+
 class Base(unittest.TestCase):
     def setUp(self):
         os.environ.update(ENV)
         scenario('default')
         reset_calls()
+        reset_scrcpy_calls()
 
     def run_spec(self, spec_id, valores=None, flags=None):
         res = core.ejecutar(SPECS[spec_id], valores or {}, flags or [])
         return res, non_devices(calls())
+
+    def run_scrcpy_spec(self, spec_id, valores=None):
+        """Como run_spec pero devuelve el argv que recibió el scrcpy falso."""
+        res = core.ejecutar(SPECS[spec_id], valores or {}, [])
+        return res, scrcpy_calls()
+
+    def defectos(self, spec_id):
+        """Los valores que la UI enviaría sin que el usuario toque nada."""
+        return {c['clave']: c.get('defecto', '') for c in SPECS[spec_id].get('campos') or []}
 
 
 class TestCatalogoIntegridad(Base):
@@ -476,9 +558,728 @@ class TestArgv(Base):
         self.assertEqual(cs, [['-s', 'SERIAL1', 'shell', 'input', 'keyevent', '4']])
 
     def test_scrcpy_flags(self):
+        # Antes solo afirmaba que no se llamó a adb; con el scrcpy falso también
+        # se comprueba la bandera real y el mensaje del proceso que ya terminó.
         res, cs = self.run_spec('sc_screenoff')
         self.assertTrue(res['success'])
         self.assertEqual(cs, [])
+        self.assertEqual(scrcpy_calls(), [['--turn-screen-off']])
+        self.assertIn('Scrcpy terminó: --turn-screen-off', res['stdout'])
+
+
+class TestGaming(Base):
+    """Sección Gaming: cada botón afirma el argv EXACTO que recibe scrcpy.
+
+    Todo el valor de esta sección está en las banderas, así que aquí no basta
+    con `success`: el scrcpy falso registra su argv y cada test lo compara
+    entero, con y sin campos opcionales rellenos.
+    """
+
+    KBM = ['-m', '1080', '-b', '9M', '--video-codec=h264', '--keyboard=uhid', '--mouse=uhid']
+
+    # ---- catálogo ----------------------------------------------------
+    def test_categoria_gaming_completa(self):
+        cats = [k for k in CAT['categorias'] if k['id'] == 'gaming']
+        self.assertEqual(len(cats), 1, 'falta la categoría gaming')
+        self.assertEqual([c['id'] for c in cats[0]['comandos']],
+                         ['game_kbm', 'game_pad', 'game_virtual', 'game_otg',
+                          'game_lowlat', 'game_encoders', 'game_apps', 'game_kbd_layout'])
+
+    # ---- el botón estrella -------------------------------------------
+    def test_game_kbm_defectos_reproduce_el_comando_del_usuario(self):
+        """Con los defectos sale exactamente el comando que el usuario ya usaba."""
+        res, sc = self.run_scrcpy_spec('game_kbm', self.defectos('game_kbm'))
+        self.assertTrue(res['success'], res['stderr'])
+        self.assertEqual(sc, [self.KBM])
+        # El scrcpy falso muere al instante: run_scrcpy ve returncode 0.
+        self.assertIn('Scrcpy terminó: ' + ' '.join(self.KBM), res['stdout'])
+        self.assertEqual(non_devices(calls()), [], 'gaming no debe llamar a adb')
+
+    def test_game_kbm_codificador_relleno(self):
+        v = dict(self.defectos('game_kbm'), encoder='c2.android.avc.encoder')
+        res, sc = self.run_scrcpy_spec('game_kbm', v)
+        self.assertTrue(res['success'], res['stderr'])
+        self.assertEqual(sc, [['-m', '1080', '-b', '9M', '--video-codec=h264',
+                               '--video-encoder=c2.android.avc.encoder',
+                               '--keyboard=uhid', '--mouse=uhid']])
+
+    def test_game_kbm_codificador_y_fps_vacios_no_generan_bandera(self):
+        """Un campo opcional vacío (o con espacios) no deja un '--video-encoder=' colgando."""
+        v = dict(self.defectos('game_kbm'), encoder='   ', max_fps='')
+        res, sc = self.run_scrcpy_spec('game_kbm', v)
+        self.assertTrue(res['success'], res['stderr'])
+        self.assertEqual(sc, [self.KBM])
+        self.assertNotIn('--video-encoder', ' '.join(sc[0]))
+        self.assertNotIn('--max-fps', ' '.join(sc[0]))
+
+    def test_game_kbm_fps_pantalla_completa_y_apagar_pantalla(self):
+        v = dict(self.defectos('game_kbm'), max_fps='60', fullscreen='1', screen_off='1')
+        res, sc = self.run_scrcpy_spec('game_kbm', v)
+        self.assertTrue(res['success'], res['stderr'])
+        self.assertEqual(sc, [['-m', '1080', '-b', '9M', '--video-codec=h264', '--max-fps=60',
+                               '--fullscreen', '--turn-screen-off',
+                               '--keyboard=uhid', '--mouse=uhid']])
+
+    def test_game_kbm_dos_dispositivos_antepone_serial(self):
+        scenario('two')
+        res, sc = self.run_scrcpy_spec('game_kbm', self.defectos('game_kbm'))
+        self.assertTrue(res['success'], res['stderr'])
+        self.assertEqual(sc, [['-s', 'SERIAL1'] + self.KBM])
+
+    def test_game_kbm_codec_alternativo(self):
+        v = dict(self.defectos('game_kbm'), codec='h265')
+        res, sc = self.run_scrcpy_spec('game_kbm', v)
+        self.assertEqual(sc[0][4], '--video-codec=h265')
+
+    # ---- mando --------------------------------------------------------
+    def test_game_pad_defectos_y_aoa(self):
+        res, sc = self.run_scrcpy_spec('game_pad', self.defectos('game_pad'))
+        self.assertTrue(res['success'], res['stderr'])
+        self.assertEqual(sc, [self.KBM + ['--gamepad=uhid']])
+        reset_scrcpy_calls()
+        v = dict(self.defectos('game_pad'), gamepad='aoa')
+        res, sc = self.run_scrcpy_spec('game_pad', v)
+        self.assertEqual(sc, [self.KBM + ['--gamepad=aoa']])
+
+    # ---- pantalla virtual ---------------------------------------------
+    def test_game_virtual_defectos(self):
+        res, sc = self.run_scrcpy_spec('game_virtual', self.defectos('game_virtual'))
+        self.assertTrue(res['success'], res['stderr'])
+        self.assertEqual(sc, [['-b', '9M', '--video-codec=h264', '--new-display=1920x1080',
+                               '--keyboard=uhid', '--mouse=uhid']])
+
+    def test_game_virtual_sin_resolucion_usa_new_display_a_secas(self):
+        v = dict(self.defectos('game_virtual'), new_display='')
+        res, sc = self.run_scrcpy_spec('game_virtual', v)
+        self.assertTrue(res['success'], res['stderr'])
+        self.assertEqual(sc, [['-b', '9M', '--video-codec=h264', '--new-display',
+                               '--keyboard=uhid', '--mouse=uhid']])
+
+    def test_game_virtual_con_dpi_app_y_mando(self):
+        v = dict(self.defectos('game_virtual'), new_display='1920x1080/420',
+                 package='com.miHoYo.GenshinImpact', gamepad='uhid', max_fps='90')
+        res, sc = self.run_scrcpy_spec('game_virtual', v)
+        self.assertTrue(res['success'], res['stderr'])
+        self.assertEqual(sc, [['-b', '9M', '--video-codec=h264', '--max-fps=90',
+                               '--new-display=1920x1080/420',
+                               '--start-app=com.miHoYo.GenshinImpact',
+                               '--keyboard=uhid', '--mouse=uhid', '--gamepad=uhid']])
+
+    def test_game_virtual_busqueda_por_nombre_de_app(self):
+        """'?' busca por nombre aproximado y '+' fuerza detener la app antes."""
+        for valor in ('?Genshin', '+?Genshin'):
+            reset_scrcpy_calls()
+            v = dict(self.defectos('game_virtual'), package=valor)
+            res, sc = self.run_scrcpy_spec('game_virtual', v)
+            self.assertTrue(res['success'], res['stderr'])
+            self.assertIn(f'--start-app={valor}', sc[0])
+
+    # ---- OTG -----------------------------------------------------------
+    def test_game_otg_defectos_y_sin_mando(self):
+        res, sc = self.run_scrcpy_spec('game_otg', self.defectos('game_otg'))
+        self.assertTrue(res['success'], res['stderr'])
+        self.assertEqual(sc, [['--otg', '--keyboard=aoa', '--mouse=aoa', '--gamepad=aoa']])
+        reset_scrcpy_calls()
+        res, sc = self.run_scrcpy_spec('game_otg', {'gamepad': ''})
+        self.assertEqual(sc, [['--otg', '--keyboard=aoa', '--mouse=aoa']])
+
+    def test_game_otg_no_lleva_banderas_de_video(self):
+        """En OTG no hay vídeo: -m, -b y --video-codec no deben aparecer."""
+        _, sc = self.run_scrcpy_spec('game_otg', self.defectos('game_otg'))
+        argv = sc[0]
+        for bandera in ('-m', '-b'):
+            self.assertNotIn(bandera, argv)
+        for prefijo in ('--video-codec', '--new-display', '--max-fps', '--video-buffer'):
+            self.assertEqual([a for a in argv if a.startswith(prefijo)], [], prefijo)
+
+    # ---- latencia mínima -----------------------------------------------
+    def test_game_lowlat_defectos(self):
+        res, sc = self.run_scrcpy_spec('game_lowlat', self.defectos('game_lowlat'))
+        self.assertTrue(res['success'], res['stderr'])
+        self.assertEqual(sc, [['-m', '720', '-b', '4M', '--video-codec=h264', '--max-fps=60',
+                               '--video-buffer=0', '--no-audio',
+                               '--keyboard=uhid', '--mouse=uhid']])
+        # --display-buffer no existe desde scrcpy 3.0: nunca debe salir.
+        self.assertNotIn('--display-buffer', ' '.join(sc[0]))
+
+    # ---- valores inválidos ---------------------------------------------
+    def _rechaza(self, spec_id, valores, trozo):
+        res, sc = self.run_scrcpy_spec(spec_id, valores)
+        self.assertFalse(res['success'], f'{trozo}: debería fallar')
+        self.assertIn(trozo, res['stderr'])
+        self.assertEqual(sc, [], 'no se debe lanzar scrcpy con un valor inválido')
+
+    def test_bitrate_invalido(self):
+        for malo in ('9 megas', '9MB', '-9M', '9M;rm', ''):
+            reset_scrcpy_calls()
+            v = dict(self.defectos('game_kbm'), bitrate=malo)
+            trozo = 'Falta el valor' if malo == '' else 'Bitrate no válido'
+            self._rechaza('game_kbm', v, trozo)
+
+    def test_codificador_con_caracteres_extranos(self):
+        for malo in ('c2.android; rm -rf ~', 'c2 android', '-c2.android', 'c2/android'):
+            reset_scrcpy_calls()
+            v = dict(self.defectos('game_kbm'), encoder=malo)
+            self._rechaza('game_kbm', v, 'Codificador no válido')
+
+    def test_resolucion_no_numerica_y_negativa(self):
+        v = dict(self.defectos('game_kbm'), max_size='mucha')
+        self._rechaza('game_kbm', v, 'debe ser un número entero')
+        reset_scrcpy_calls()
+        v = dict(self.defectos('game_kbm'), max_size='-5')
+        self._rechaza('game_kbm', v, 'no puede ser negativo')
+
+    def test_pantalla_virtual_invalida(self):
+        for malo in ('1920*1080', '1920x', 'grande', '/'):
+            reset_scrcpy_calls()
+            v = dict(self.defectos('game_virtual'), new_display=malo)
+            self._rechaza('game_virtual', v, 'Pantalla virtual no válida')
+
+    def test_paquete_invalido_en_pantalla_virtual(self):
+        v = dict(self.defectos('game_virtual'), package='no es un paquete')
+        self._rechaza('game_virtual', v, 'Paquete no válido')
+
+    def test_codec_y_mando_fuera_de_lista(self):
+        v = dict(self.defectos('game_kbm'), codec='h266')
+        self._rechaza('game_kbm', v, 'Códec de vídeo no válido')
+        reset_scrcpy_calls()
+        v = dict(self.defectos('game_pad'), gamepad='sdk')
+        self._rechaza('game_pad', v, 'Mando no válido')
+
+    def test_campo_obligatorio_vacio(self):
+        v = dict(self.defectos('game_lowlat'), video_buffer='')
+        self._rechaza('game_lowlat', v, 'Falta el valor: Búfer de vídeo')
+
+    def test_modo_de_gaming_desconocido(self):
+        with self.assertRaises(ValueError) as ctx:
+            core.scrcpy_game_args({'mode': 'consola'})
+        self.assertIn('Modo de gaming desconocido', str(ctx.exception))
+        self.assertEqual(scrcpy_calls(), [])
+
+    # ---- listados (salida capturada) ------------------------------------
+    def test_listar_codificadores_devuelve_la_salida(self):
+        res, sc = self.run_scrcpy_spec('game_encoders')
+        self.assertTrue(res['success'], res['stderr'])
+        self.assertEqual(sc, [['--list-encoders']])
+        self.assertIn('c2.android.avc.encoder', res['stdout'])
+        # stderr (banner) primero, stdout (listado) después.
+        self.assertLess(res['stdout'].index('scrcpy 4.1'),
+                        res['stdout'].index('List of video encoders'))
+
+    def test_listar_apps_devuelve_los_paquetes(self):
+        res, sc = self.run_scrcpy_spec('game_apps')
+        self.assertTrue(res['success'], res['stderr'])
+        self.assertEqual(sc, [['--list-apps']])
+        self.assertIn('com.miHoYo.GenshinImpact', res['stdout'])
+
+    def test_listados_con_dos_dispositivos_usan_serial(self):
+        scenario('two')
+        res, sc = self.run_scrcpy_spec('game_encoders')
+        self.assertTrue(res['success'], res['stderr'])
+        self.assertEqual(sc, [['-s', 'SERIAL1', '--list-encoders']])
+
+    def test_listado_desconocido(self):
+        res = core.act_scrcpy_list('lunas')
+        self.assertFalse(res['success'])
+        self.assertIn('Listado de scrcpy desconocido', res['stderr'])
+        self.assertEqual(scrcpy_calls(), [])
+
+    def test_listado_que_falla_devuelve_stderr(self):
+        scenario('scrcpy_fail')
+        res, sc = self.run_scrcpy_spec('game_encoders')
+        self.assertFalse(res['success'])
+        self.assertIn('Could not find encoder', res['stderr'])
+        self.assertEqual(sc, [['--list-encoders']])
+
+    # ---- ramas de run_scrcpy --------------------------------------------
+    def test_scrcpy_que_muere_al_arrancar_es_un_fallo(self):
+        scenario('scrcpy_fail')
+        res, sc = self.run_scrcpy_spec('game_kbm', self.defectos('game_kbm'))
+        self.assertFalse(res['success'])
+        self.assertIn('Could not find encoder', res['stderr'])
+        self.assertEqual(sc, [self.KBM])
+
+    def test_scrcpy_que_sigue_vivo_se_da_por_lanzado(self):
+        """Si sobrevive a los 1,5 s de run_scrcpy, el mensaje es 'Scrcpy lanzado'.
+
+        run_scrcpy() lanza desacoplado y no devuelve el proceso, así que aquí se
+        espía Popen solo para poder matar al falso al terminar (si no, queda un
+        `sleep` suelto y Python avisa de un subproceso sin recoger).
+        """
+        scenario('scrcpy_alive')
+        procesos = []
+        popen_real = core.subprocess.Popen
+
+        def espia(*a, **kw):
+            proc = popen_real(*a, **kw)
+            procesos.append(proc)
+            return proc
+
+        self.addCleanup(self._matar, procesos)
+        with mock.patch.object(core.subprocess, 'Popen', espia):
+            res, sc = self.run_scrcpy_spec('game_kbm', self.defectos('game_kbm'))
+        self.assertTrue(res['success'], res['stderr'])
+        self.assertIn('Scrcpy lanzado: ' + ' '.join(self.KBM), res['stdout'])
+        self.assertEqual(sc, [self.KBM])
+
+    @staticmethod
+    def _matar(procesos):
+        for proc in procesos:
+            try:
+                proc.kill()
+                proc.wait(timeout=5)
+                if proc.stderr:
+                    proc.stderr.close()
+            except Exception:
+                pass
+
+    # ---- teclado físico --------------------------------------------------
+    def test_configurar_teclado_fisico_usa_adb(self):
+        """El botón del teclado físico no es scrcpy: abre los ajustes por adb."""
+        res, cs = self.run_spec('game_kbd_layout')
+        self.assertTrue(res['success'], res['stderr'])
+        self.assertEqual(cs, [['shell', 'am', 'start', '-a',
+                               'android.settings.HARD_KEYBOARD_SETTINGS']])
+        self.assertEqual(scrcpy_calls(), [])
+
+
+class TestRendimiento(Base):
+    """Sección «Rendimiento y Juegos»: argv exacto de cada botón.
+
+    Aquí no hay banderas de scrcpy sino comandos del móvil, así que cada test
+    compara la lista completa que recibe el adb falso. La trampa gorda de
+    'cmd game' (solo acepta apps declaradas como juego, y el rechazo sale por
+    stdout CON código 0) tiene su propio escenario.
+    """
+
+    JUEGO = 'com.miHoYo.GenshinImpact'
+    # Valores que ninguna validación debe dejar pasar a adb.
+    HOSTILES = ('com.x; id', 'com.x $(id)', '--otra-bandera', 'com.x rm -rf ~',
+                'com. x', 'com.x&&reboot')
+
+    def _rechaza(self, spec_id, valores, trozo):
+        """El botón falla con un error claro y NO llega nada a adb."""
+        res, cs = self.run_spec(spec_id, valores)
+        self.assertFalse(res['success'], f'{trozo}: debería fallar')
+        self.assertIn(trozo, res['stderr'])
+        self.assertEqual(cs, [], 'no se debe llamar a adb con un valor inválido')
+
+    # ---- catálogo ------------------------------------------------------
+    def test_categoria_rendimiento_completa(self):
+        cats = [k for k in CAT['categorias'] if k['id'] == 'rendimiento']
+        self.assertEqual(len(cats), 1, 'falta la categoría rendimiento')
+        self.assertEqual([c['id'] for c in cats[0]['comandos']],
+                         ['perf_game_mode', 'perf_game_modes', 'perf_game_configs',
+                          'perf_game_set', 'perf_game_reset', 'perf_refresh_get',
+                          'perf_refresh_put', 'perf_refresh_reset', 'perf_gfxinfo',
+                          'perf_thermal', 'perf_compile', 'perf_compile_reset'])
+
+    def test_todos_los_botones_de_cmd_game_avisan_de_la_trampa(self):
+        """Un botón de 'cmd game' sin el aviso parecerá roto con una app normal."""
+        juegos = [c for c in SPECS.values()
+                  if c.get('accion') in ('game_mode', 'game_list', 'game_set', 'game_reset')]
+        self.assertEqual(len(juegos), 5)
+        for spec in juegos:
+            self.assertIn('appCategory', spec.get('advertencia', ''), spec['id'])
+
+    # ---- cmd game mode --------------------------------------------------
+    def test_game_mode_argv(self):
+        res, cs = self.run_spec('perf_game_mode', {'mode': 'performance', 'package': self.JUEGO})
+        self.assertTrue(res['success'], res['stderr'])
+        self.assertEqual(cs, [['shell', 'cmd', 'game', 'mode', 'performance', self.JUEGO]])
+
+    def test_game_mode_los_tres_modos(self):
+        for modo in ('standard', 'performance', 'battery'):
+            reset_calls()
+            res, cs = self.run_spec('perf_game_mode', {'mode': modo, 'package': self.JUEGO})
+            self.assertTrue(res['success'], res['stderr'])
+            self.assertEqual(cs, [['shell', 'cmd', 'game', 'mode', modo, self.JUEGO]])
+
+    def test_game_mode_defectos_piden_el_paquete(self):
+        """El paquete viene vacío a propósito: sin él la app no debe inventarse nada."""
+        self._rechaza('perf_game_mode', self.defectos('perf_game_mode'), 'Falta el valor')
+
+    def test_game_mode_dos_dispositivos_antepone_serial(self):
+        scenario('two')
+        res, cs = self.run_spec('perf_game_mode', {'mode': 'performance', 'package': self.JUEGO})
+        self.assertTrue(res['success'], res['stderr'])
+        self.assertEqual(cs, [['-s', 'SERIAL1', 'shell', 'cmd', 'game', 'mode',
+                               'performance', self.JUEGO]])
+
+    def test_game_mode_modo_fuera_de_lista(self):
+        self._rechaza('perf_game_mode', {'mode': 'turbo', 'package': self.JUEGO},
+                      'modo de juego no válido')
+
+    def test_game_mode_paquetes_hostiles(self):
+        for malo in self.HOSTILES:
+            reset_calls()
+            self._rechaza('perf_game_mode', {'mode': 'performance', 'package': malo},
+                          'Nombre de paquete no válido')
+
+    # ---- listados de cmd game -------------------------------------------
+    def test_game_list_modes_y_configs(self):
+        for spec_id, sub in (('perf_game_modes', 'list-modes'),
+                             ('perf_game_configs', 'list-configs')):
+            reset_calls()
+            res, cs = self.run_spec(spec_id, {'package': self.JUEGO})
+            self.assertTrue(res['success'], res['stderr'])
+            self.assertEqual(cs, [['shell', 'cmd', 'game', sub, self.JUEGO]])
+
+    def test_game_list_desconocido(self):
+        res = core.act_game_list('nada', self.JUEGO)
+        self.assertFalse(res['success'])
+        self.assertIn('Listado de modo de juego desconocido', res['stderr'])
+        self.assertEqual(non_devices(calls()), [])
+
+    def test_game_reset_argv(self):
+        res, cs = self.run_spec('perf_game_reset', {'package': self.JUEGO})
+        self.assertTrue(res['success'], res['stderr'])
+        self.assertEqual(cs, [['shell', 'cmd', 'game', 'reset', self.JUEGO]])
+
+    # ---- cmd game set (campos opcionales) --------------------------------
+    def test_game_set_defectos_solo_reescalado(self):
+        v = dict(self.defectos('perf_game_set'), package=self.JUEGO)
+        res, cs = self.run_spec('perf_game_set', v)
+        self.assertTrue(res['success'], res['stderr'])
+        self.assertEqual(cs, [['shell', 'cmd', 'game', 'set', '--downscale', '0.75', self.JUEGO]])
+
+    def test_game_set_solo_fps(self):
+        """El campo vacío no debe dejar un '--downscale' sin valor detrás."""
+        v = {'downscale': '', 'fps': '60', 'package': self.JUEGO}
+        res, cs = self.run_spec('perf_game_set', v)
+        self.assertTrue(res['success'], res['stderr'])
+        self.assertEqual(cs, [['shell', 'cmd', 'game', 'set', '--fps', '60', self.JUEGO]])
+        self.assertNotIn('--downscale', cs[0])
+
+    def test_game_set_los_dos_ajustes_y_el_paquete_al_final(self):
+        v = {'downscale': '0.5', 'fps': '0', 'package': self.JUEGO}
+        res, cs = self.run_spec('perf_game_set', v)
+        self.assertTrue(res['success'], res['stderr'])
+        self.assertEqual(cs, [['shell', 'cmd', 'game', 'set', '--downscale', '0.5',
+                               '--fps', '0', self.JUEGO]])
+
+    def test_game_set_sin_ningun_ajuste_no_llama_a_adb(self):
+        v = {'downscale': '', 'fps': '', 'package': self.JUEGO}
+        self._rechaza('perf_game_set', v, 'Indica al menos un ajuste')
+
+    def test_game_set_fps_negativo_y_no_numerico(self):
+        v = {'downscale': '', 'fps': '-30', 'package': self.JUEGO}
+        self._rechaza('perf_game_set', v, 'no puede ser negativo')
+        reset_calls()
+        v = {'downscale': '', 'fps': 'sesenta', 'package': self.JUEGO}
+        self._rechaza('perf_game_set', v, 'debe ser un número entero')
+
+    def test_game_set_reescalado_fuera_de_lista(self):
+        v = {'downscale': '0.99', 'fps': '', 'package': self.JUEGO}
+        self._rechaza('perf_game_set', v, 'reescalado no válido')
+
+    # ---- la trampa: la app no es un juego ---------------------------------
+    def test_app_que_no_es_juego_se_marca_como_error(self):
+        """El móvil contesta por stdout y SALE CON 0: sin leerlo parecería un éxito."""
+        scenario('game_not_game')
+        casos = [('perf_game_mode', {'mode': 'performance', 'package': 'com.android.settings'}),
+                 ('perf_game_modes', {'package': 'com.android.settings'}),
+                 ('perf_game_configs', {'package': 'com.android.settings'}),
+                 ('perf_game_reset', {'package': 'com.android.settings'}),
+                 ('perf_game_set', {'downscale': '0.5', 'fps': '', 'package': 'com.android.settings'})]
+        for spec_id, valores in casos:
+            reset_calls()
+            res, cs = self.run_spec(spec_id, valores)
+            self.assertFalse(res['success'], f'{spec_id} debería marcarse como error')
+            self.assertIn('is not of game type', res['stderr'])
+            self.assertIn('android:appCategory="game"', res['stderr'])
+            self.assertEqual(len(cs), 1, spec_id)
+
+    # ---- tasa de refresco --------------------------------------------------
+    def test_refresh_get_lee_las_dos_claves(self):
+        res, cs = self.run_spec('perf_refresh_get')
+        self.assertTrue(res['success'], res['stderr'])
+        self.assertEqual(cs, [['shell', 'settings', 'get', 'system', 'min_refresh_rate'],
+                              ['shell', 'settings', 'get', 'system', 'peak_refresh_rate']])
+        self.assertEqual(res['stdout'], 'min_refresh_rate: null\npeak_refresh_rate: null')
+
+    def test_refresh_put_escribe_las_dos_claves(self):
+        res, cs = self.run_spec('perf_refresh_put', self.defectos('perf_refresh_put'))
+        self.assertTrue(res['success'], res['stderr'])
+        self.assertEqual(cs, [['shell', 'settings', 'put', 'system', 'min_refresh_rate', '120'],
+                              ['shell', 'settings', 'put', 'system', 'peak_refresh_rate', '120']])
+        self.assertIn('Para volver al automático', res['stdout'])
+
+    def test_refresh_put_dos_dispositivos(self):
+        scenario('two')
+        res, cs = self.run_spec('perf_refresh_put', {'hz': '60'})
+        self.assertTrue(res['success'], res['stderr'])
+        self.assertEqual(cs, [['-s', 'SERIAL1', 'shell', 'settings', 'put', 'system',
+                               'min_refresh_rate', '60'],
+                              ['-s', 'SERIAL1', 'shell', 'settings', 'put', 'system',
+                               'peak_refresh_rate', '60']])
+
+    def test_refresh_reset_borra_y_no_escribe_numero(self):
+        """Restablecer es BORRAR: escribir un número «por defecto» dejaría otra tasa clavada."""
+        res, cs = self.run_spec('perf_refresh_reset')
+        self.assertTrue(res['success'], res['stderr'])
+        self.assertEqual(cs, [['shell', 'settings', 'delete', 'system', 'min_refresh_rate'],
+                              ['shell', 'settings', 'delete', 'system', 'peak_refresh_rate']])
+
+    def test_refresh_put_valores_malos(self):
+        self._rechaza('perf_refresh_put', {'hz': '500'}, 'fuera de rango')
+        reset_calls()
+        self._rechaza('perf_refresh_put', {'hz': '0'}, 'fuera de rango')
+        reset_calls()
+        self._rechaza('perf_refresh_put', {'hz': '-60'}, 'no puede ser negativo')
+        reset_calls()
+        self._rechaza('perf_refresh_put', {'hz': '120 Hz'}, 'debe ser un número entero')
+        reset_calls()
+        self._rechaza('perf_refresh_put', {'hz': ''}, 'Falta el valor')
+
+    def test_refresh_operacion_desconocida(self):
+        res = core.act_refresh_rate('borrar')
+        self.assertFalse(res['success'])
+        self.assertIn('Operación de tasa de refresco desconocida', res['stderr'])
+        self.assertEqual(non_devices(calls()), [])
+
+    def test_refresh_put_que_falla_se_marca_como_error(self):
+        scenario('settings_fail')
+        res, cs = self.run_spec('perf_refresh_put', {'hz': '120'})
+        self.assertFalse(res['success'])
+        self.assertIn('settings falló en alguna de las dos claves', res['stderr'])
+        self.assertEqual(len(cs), 2, 'las dos claves se intentan igual')
+
+    # ---- gfxinfo y estado térmico -------------------------------------------
+    def test_gfxinfo_argv(self):
+        res, cs = self.run_spec('perf_gfxinfo', {'package': self.JUEGO})
+        self.assertTrue(res['success'], res['stderr'])
+        self.assertEqual(cs, [['shell', 'dumpsys', 'gfxinfo', self.JUEGO]])
+
+    def test_gfxinfo_paquetes_hostiles(self):
+        for malo in self.HOSTILES:
+            reset_calls()
+            self._rechaza('perf_gfxinfo', {'package': malo}, 'Nombre de paquete no válido')
+
+    def test_gfxinfo_servicio_hostil(self):
+        """El servicio sale del catálogo, pero la función lo valida igual."""
+        res = core.act_dumpsys_app('gfxinfo; id', self.JUEGO)
+        self.assertFalse(res['success'])
+        self.assertIn('Servicio no válido', res['stderr'])
+        self.assertEqual(non_devices(calls()), [])
+
+    def test_thermal_argv(self):
+        res, cs = self.run_spec('perf_thermal')
+        self.assertTrue(res['success'], res['stderr'])
+        self.assertEqual(cs, [['shell', 'dumpsys', 'thermalservice']])
+
+    # ---- dexopt --------------------------------------------------------------
+    def test_compile_defectos(self):
+        v = dict(self.defectos('perf_compile'), package=self.JUEGO)
+        res, cs = self.run_spec('perf_compile', v)
+        self.assertTrue(res['success'], res['stderr'])
+        self.assertEqual(cs, [['shell', 'cmd', 'package', 'compile', '-m', 'speed',
+                               '-f', self.JUEGO]])
+
+    def test_compile_los_tres_filtros(self):
+        for filtro in ('speed', 'speed-profile', 'verify'):
+            reset_calls()
+            res, cs = self.run_spec('perf_compile', {'filtro': filtro, 'package': self.JUEGO})
+            self.assertTrue(res['success'], res['stderr'])
+            self.assertEqual(cs, [['shell', 'cmd', 'package', 'compile', '-m', filtro,
+                                   '-f', self.JUEGO]])
+
+    def test_compile_filtro_fuera_de_lista(self):
+        self._rechaza('perf_compile', {'filtro': 'everything', 'package': self.JUEGO},
+                      'filtro de compilación no válido')
+
+    def test_compile_reset_argv(self):
+        res, cs = self.run_spec('perf_compile_reset', {'package': self.JUEGO})
+        self.assertTrue(res['success'], res['stderr'])
+        self.assertEqual(cs, [['shell', 'cmd', 'package', 'compile', '--reset', self.JUEGO]])
+
+    def test_compile_error_con_codigo_0_se_marca_como_fallo(self):
+        scenario('compile_fail')
+        res, cs = self.run_spec('perf_compile', {'filtro': 'speed', 'package': self.JUEGO})
+        self.assertFalse(res['success'])
+        self.assertIn('not found', res['stderr'])
+        self.assertEqual(len(cs), 1)
+
+
+class TestPermisosPantallaYRed(Base):
+    """Botones nuevos de Apps, Pantalla, Red y Diagnóstico: argv exacto."""
+
+    PKG = 'com.example.app'
+    HOSTILES = TestRendimiento.HOSTILES
+
+    def _rechaza(self, spec_id, valores, trozo):
+        res, cs = self.run_spec(spec_id, valores)
+        self.assertFalse(res['success'], f'{trozo}: debería fallar')
+        self.assertIn(trozo, res['stderr'])
+        self.assertEqual(cs, [], 'no se debe llamar a adb con un valor inválido')
+
+    # ---- appops -----------------------------------------------------------
+    def test_appops_get_sin_operacion(self):
+        res, cs = self.run_spec('pm_appops_get', {'package': self.PKG, 'op': ''})
+        self.assertTrue(res['success'], res['stderr'])
+        self.assertEqual(cs, [['shell', 'cmd', 'appops', 'get', self.PKG]])
+        self.assertIn('sin operaciones registradas', res['stdout'])
+
+    def test_appops_get_operacion_vacia_o_con_espacios_no_anade_argumento(self):
+        res, cs = self.run_spec('pm_appops_get', {'package': self.PKG, 'op': '   '})
+        self.assertTrue(res['success'], res['stderr'])
+        self.assertEqual(cs, [['shell', 'cmd', 'appops', 'get', self.PKG]])
+
+    def test_appops_get_con_operacion(self):
+        for op in ('SYSTEM_ALERT_WINDOW', 'android:coarse_location'):
+            reset_calls()
+            res, cs = self.run_spec('pm_appops_get', {'package': self.PKG, 'op': op})
+            self.assertTrue(res['success'], res['stderr'])
+            # La operación llega como UN solo argumento, sin partirse ni citarse.
+            self.assertEqual(cs, [['shell', 'cmd', 'appops', 'get', self.PKG, op]])
+
+    def test_appops_get_devuelve_la_salida_tal_cual(self):
+        scenario('appops')
+        res, cs = self.run_spec('pm_appops_get', {'package': self.PKG, 'op': ''})
+        self.assertTrue(res['success'], res['stderr'])
+        self.assertIn('SYSTEM_ALERT_WINDOW: allow', res['stdout'])
+        self.assertNotIn('sin operaciones registradas', res['stdout'])
+
+    def test_appops_get_dos_dispositivos(self):
+        scenario('two')
+        res, cs = self.run_spec('pm_appops_get', {'package': self.PKG, 'op': ''})
+        self.assertTrue(res['success'], res['stderr'])
+        self.assertEqual(cs, [['-s', 'SERIAL1', 'shell', 'cmd', 'appops', 'get', self.PKG]])
+
+    def test_appops_set_defectos(self):
+        v = dict(self.defectos('pm_appops_set'), package=self.PKG)
+        res, cs = self.run_spec('pm_appops_set', v)
+        self.assertTrue(res['success'], res['stderr'])
+        self.assertEqual(cs, [['shell', 'cmd', 'appops', 'set', self.PKG,
+                               'SYSTEM_ALERT_WINDOW', 'allow']])
+
+    def test_appops_set_los_cuatro_modos(self):
+        for modo in ('allow', 'ignore', 'deny', 'default'):
+            reset_calls()
+            res, cs = self.run_spec('pm_appops_set', {'package': self.PKG,
+                                                      'op': 'RUN_IN_BACKGROUND', 'mode': modo})
+            self.assertTrue(res['success'], res['stderr'])
+            self.assertEqual(cs, [['shell', 'cmd', 'appops', 'set', self.PKG,
+                                   'RUN_IN_BACKGROUND', modo]])
+
+    def test_appops_set_modo_fuera_de_lista(self):
+        self._rechaza('pm_appops_set', {'package': self.PKG, 'op': 'RUN_IN_BACKGROUND',
+                                        'mode': 'siempre'}, 'modo no válido')
+
+    def test_appops_operaciones_hostiles(self):
+        for malo in ('RUN IN BACKGROUND', 'OP; id', '$(id)', '--otra-bandera', '1OP'):
+            reset_calls()
+            self._rechaza('pm_appops_set', {'package': self.PKG, 'op': malo, 'mode': 'allow'},
+                          'Operación de appops no válida')
+
+    def test_appops_paquetes_hostiles(self):
+        for malo in self.HOSTILES:
+            reset_calls()
+            self._rechaza('pm_appops_set', {'package': malo, 'op': 'RUN_IN_BACKGROUND',
+                                            'mode': 'allow'}, 'Nombre de paquete no válido')
+
+    # ---- brillo -------------------------------------------------------------
+    def test_brillo_get(self):
+        res, cs = self.run_spec('brightness_get')
+        self.assertTrue(res['success'], res['stderr'])
+        self.assertEqual(cs, [['shell', 'cmd', 'display', 'get-brightness',
+                               '--unit', 'percentage']])
+        self.assertEqual(res['stdout'], 'Brillo actual: 42 %')
+
+    def test_brillo_set_defectos(self):
+        res, cs = self.run_spec('brightness_set', self.defectos('brightness_set'))
+        self.assertTrue(res['success'], res['stderr'])
+        self.assertEqual(cs, [['shell', 'cmd', 'display', 'set-brightness', '50',
+                               '--unit', 'percentage']])
+        self.assertIn('Brillo fijado al 50 %', res['stdout'])
+
+    def test_brillo_extremos_validos(self):
+        for nivel in ('0', '100'):
+            reset_calls()
+            res, cs = self.run_spec('brightness_set', {'nivel': nivel})
+            self.assertTrue(res['success'], res['stderr'])
+            self.assertEqual(cs[0][4], nivel)
+
+    def test_brillo_valores_malos(self):
+        self._rechaza('brightness_set', {'nivel': '150'}, 'El brillo va de 0 a 100 %')
+        reset_calls()
+        self._rechaza('brightness_set', {'nivel': '-10'}, 'no puede ser negativo')
+        reset_calls()
+        self._rechaza('brightness_set', {'nivel': 'medio'}, 'debe ser un número entero')
+        reset_calls()
+        self._rechaza('brightness_set', {'nivel': ''}, 'Falta el valor')
+
+    def test_brillo_dos_dispositivos(self):
+        scenario('two')
+        res, cs = self.run_spec('brightness_get')
+        self.assertTrue(res['success'], res['stderr'])
+        self.assertEqual(cs, [['-s', 'SERIAL1', 'shell', 'cmd', 'display', 'get-brightness',
+                               '--unit', 'percentage']])
+
+    # ---- netpolicy ------------------------------------------------------------
+    def test_netpolicy_cada_consulta(self):
+        esperado = {'status': ['get', 'restrict-background'],
+                    'blacklist': ['list', 'restrict-background-blacklist'],
+                    'whitelist': ['list', 'restrict-background-whitelist'],
+                    'wifi': ['list', 'wifi-networks']}
+        for what, cola in esperado.items():
+            reset_calls()
+            res, cs = self.run_spec('net_policy', {'what': what})
+            self.assertTrue(res['success'], res['stderr'])
+            self.assertEqual(cs, [['shell', 'cmd', 'netpolicy'] + cola])
+
+    def test_netpolicy_lista_vacia_lo_dice(self):
+        res, _ = self.run_spec('net_policy', {'what': 'blacklist'})
+        self.assertEqual(res['stdout'], '(lista vacía)')
+
+    def test_netpolicy_status_devuelve_la_salida(self):
+        res, _ = self.run_spec('net_policy', {'what': 'status'})
+        self.assertIn('Restrict background status', res['stdout'])
+
+    def test_netpolicy_consulta_desconocida(self):
+        res = core.act_netpolicy('todo')
+        self.assertFalse(res['success'])
+        self.assertIn('Consulta de netpolicy desconocida', res['stderr'])
+        self.assertEqual(non_devices(calls()), [])
+
+    def test_netpolicy_restrict_true_y_false(self):
+        for estado in ('true', 'false'):
+            reset_calls()
+            res, cs = self.run_spec('net_restrict_set', {'estado': estado})
+            self.assertTrue(res['success'], res['stderr'])
+            self.assertEqual(cs, [['shell', 'cmd', 'netpolicy', 'set',
+                                   'restrict-background', estado]])
+            self.assertIn(f'restrict-background): {estado}', res['stdout'])
+
+    def test_netpolicy_restrict_valores_malos(self):
+        for malo in ('sí', '1', 'true; id', ''):
+            reset_calls()
+            trozo = 'Falta el valor' if malo == '' else 'estado no válido'
+            self._rechaza('net_restrict_set', {'estado': malo}, trozo)
+
+    # ---- botones de lectura sin campos ------------------------------------------
+    def test_lecturas_nuevas_argv(self):
+        esperado = {'pm_users': ['shell', 'pm', 'list', 'users'],
+                    'dismiss_keyguard': ['shell', 'wm', 'dismiss-keyguard'],
+                    'db_deviceidle': ['shell', 'dumpsys', 'deviceidle'],
+                    'db_batterystats': ['shell', 'dumpsys', 'batterystats'],
+                    'db_uptime': ['shell', 'uptime'],
+                    'db_services': ['shell', 'service', 'list']}
+        for spec_id, argv in esperado.items():
+            reset_calls()
+            res, cs = self.run_spec(spec_id)
+            self.assertTrue(res['success'], f'{spec_id}: {res["stderr"]}')
+            self.assertEqual(cs, [argv], spec_id)
+
+    def test_lecturas_nuevas_con_dos_dispositivos(self):
+        scenario('two')
+        for spec_id, argv in (('pm_users', ['shell', 'pm', 'list', 'users']),
+                              ('db_uptime', ['shell', 'uptime']),
+                              ('db_services', ['shell', 'service', 'list'])):
+            reset_calls()
+            res, cs = self.run_spec(spec_id)
+            self.assertTrue(res['success'], res['stderr'])
+            self.assertEqual(cs, [['-s', 'SERIAL1'] + argv], spec_id)
 
 
 class TestResultados(Base):

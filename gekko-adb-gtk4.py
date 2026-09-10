@@ -311,6 +311,13 @@ class GekkoAdbGtk4App(Gtk.Application):
         desc.set_css_classes(['card-desc'])
         card.append(desc)
 
+        # El diálogo de confirmación solo aparece con 'confirmar': sin esta
+        # etiqueta, la advertencia de un botón no destructivo no se vería nunca.
+        if spec.get('advertencia'):
+            aviso = Gtk.Label(label=f"⚠ {spec['advertencia']}", xalign=0, wrap=True)
+            aviso.set_css_classes(['card-warn'])
+            card.append(aviso)
+
         if spec.get('especial') == 'terminal':
             btn = Gtk.Button(label='⌨  Ir a la consola')
             btn.set_css_classes(['cmd-btn'])

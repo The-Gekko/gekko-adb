@@ -17,7 +17,7 @@
         {"id": "devices", "titulo": "Listar dispositivos", "desc": "adb devices -l (detalle y estado de cada conexión)", "accion": "devices"},
         {"id": "get_state", "titulo": "Estado, serial y ruta USB", "desc": "adb get-state / get-serialno / get-devpath", "accion": "get_state"},
         {"id": "wait_for_device", "titulo": "Esperar dispositivo", "desc": "adb wait-for-device (hasta 120 s)", "accion": "wait_for_device"},
-        {"id": "reconnect", "titulo": "Reconectar", "desc": "adb reconnect [offline|device] (fuerza la reconexión del transporte)", "accion": "reconnect", "campos": [{"clave": "target", "tipo": "select", "etiqueta": "Qué reconectar", "defecto": "", "opciones": [{"valor": "", "etiqueta": "Todo (host)"}, {"valor": "offline", "etiqueta": "Solo los offline"}, {"valor": "device", "etiqueta": "Desde el dispositivo"}]}]},
+        {"id": "reconnect", "titulo": "Reconectar", "desc": "adb reconnect [offline|device] (fuerza la reconexión del transporte)", "accion": "reconnect", "campos": [{"clave": "target", "tipo": "select", "etiqueta": "Qué reconectar", "defecto": "", "opcional": true, "opciones": [{"valor": "", "etiqueta": "Todo (host)"}, {"valor": "offline", "etiqueta": "Solo los offline"}, {"valor": "device", "etiqueta": "Desde el dispositivo"}]}]},
         {"id": "version", "titulo": "Versión de ADB", "desc": "adb version", "accion": "version"},
         {"id": "start_server", "titulo": "Iniciar servidor ADB", "desc": "adb start-server", "accion": "start_server"},
         {"id": "kill_server", "titulo": "Detener servidor ADB", "desc": "adb kill-server (la app pausa el sondeo hasta que pulses Refrescar)", "accion": "kill_server"},
@@ -82,7 +82,7 @@
         {"id": "extract", "titulo": "Extraer APK del celular", "desc": "pm path + pull → ~/Descargas/<paquete>.apk (o carpeta con base + splits)", "accion": "extract_apk", "campos": [{"clave": "package", "tipo": "paquete", "etiqueta": "Paquete (ej. com.android.chrome)"}]},
         {"id": "app_launch", "titulo": "Abrir app", "desc": "adb shell monkey -p <paquete> -c LAUNCHER 1", "accion": "app_launch", "campos": [{"clave": "package", "tipo": "paquete", "etiqueta": "Paquete"}]},
         {"id": "app_info", "titulo": "Ficha de la app en Ajustes", "desc": "am start -a android.settings.APPLICATION_DETAILS_SETTINGS -d package:<paquete>", "accion": "app_info", "campos": [{"clave": "package", "tipo": "paquete", "etiqueta": "Paquete"}]},
-        {"id": "sideload", "titulo": "Sideload OTA", "desc": "adb sideload <archivo .zip> (desde recovery)", "accion": "sideload", "campos": [{"clave": "ota", "tipo": "archivo", "etiqueta": "Paquete OTA .zip"}]}
+        {"id": "sideload", "titulo": "Sideload OTA", "desc": "adb sideload <archivo .zip> (desde recovery)", "accion": "sideload", "peligro": true, "confirmar": true, "advertencia": "Solo con el móvil en recovery y con un OTA firmado para TU modelo exacto; un zip equivocado puede impedir que arranque.", "campos": [{"clave": "ota", "tipo": "archivo", "etiqueta": "Paquete OTA .zip"}]}
       ]
     },
     {
@@ -139,15 +139,23 @@
       "icono": "📋",
       "desc": "Acciones pm (package manager) sobre cualquier app.",
       "comandos": [
-        {"id": "pm_list", "titulo": "Listar paquetes", "desc": "adb shell pm list packages [-u|-3|-s|-d|-e]", "accion": "list_packages", "campos": [{"clave": "filtro", "tipo": "select", "etiqueta": "Filtro", "defecto": "-u", "opciones": [{"valor": "-u", "etiqueta": "Todas (incl. desinstaladas)"}, {"valor": "", "etiqueta": "Instaladas"}, {"valor": "-3", "etiqueta": "Solo de terceros"}, {"valor": "-s", "etiqueta": "Solo de sistema"}, {"valor": "-d", "etiqueta": "Solo desactivadas"}, {"valor": "-e", "etiqueta": "Solo activadas"}]}]},
-        {"id": "pm_disable", "titulo": "Desactivar app", "desc": "adb shell pm disable-user --user 0 <paquete>", "accion": "pm_action", "args": {"action": "disable"}, "campos": [{"clave": "package", "tipo": "paquete", "etiqueta": "Paquete"}]},
+        {"id": "pm_list", "titulo": "Listar paquetes", "desc": "adb shell pm list packages [-u|-3|-s|-d|-e]", "accion": "list_packages", "campos": [{"clave": "filtro", "tipo": "select", "etiqueta": "Filtro", "defecto": "-u", "opcional": true, "opciones": [{"valor": "-u", "etiqueta": "Todas (incl. desinstaladas)"}, {"valor": "", "etiqueta": "Instaladas"}, {"valor": "-3", "etiqueta": "Solo de terceros"}, {"valor": "-s", "etiqueta": "Solo de sistema"}, {"valor": "-d", "etiqueta": "Solo desactivadas"}, {"valor": "-e", "etiqueta": "Solo activadas"}]}]},
+        {"id": "pm_disable", "titulo": "Desactivar app", "desc": "adb shell pm disable-user --user 0 <paquete>", "accion": "pm_action", "args": {"action": "disable"}, "peligro": true, "confirmar": true, "advertencia": "Desactivar un paquete del sistema (SystemUI, launcher, teléfono…) puede dejar el móvil inservible hasta reiniciar. Se deshace con «Reactivar app».", "campos": [{"clave": "package", "tipo": "paquete", "etiqueta": "Paquete"}]},
         {"id": "pm_enable", "titulo": "Reactivar app", "desc": "adb shell pm enable --user 0 <paquete>", "accion": "pm_action", "args": {"action": "enable"}, "campos": [{"clave": "package", "tipo": "paquete", "etiqueta": "Paquete"}]},
         {"id": "pm_clear", "titulo": "Limpiar datos", "desc": "adb shell pm clear <paquete>", "accion": "pm_action", "args": {"action": "clear"}, "peligro": true, "confirmar": true, "campos": [{"clave": "package", "tipo": "paquete", "etiqueta": "Paquete"}]},
         {"id": "pm_stop", "titulo": "Forzar detención", "desc": "adb shell am force-stop <paquete>", "accion": "pm_action", "args": {"action": "force-stop"}, "campos": [{"clave": "package", "tipo": "paquete", "etiqueta": "Paquete"}]},
         {"id": "pm_uninstall0", "titulo": "Desinstalar (usuario 0)", "desc": "adb shell pm uninstall --user 0 <paquete> (debloat; se deshace con 'Restaurar app de stock')", "accion": "pm_action", "args": {"action": "uninstall"}, "peligro": true, "confirmar": true, "campos": [{"clave": "package", "tipo": "paquete", "etiqueta": "Paquete"}]},
         {"id": "pm_grant", "titulo": "Conceder permiso", "desc": "adb shell pm grant <paquete> <permiso>", "accion": "pm_action", "args": {"action": "grant"}, "campos": [{"clave": "package", "tipo": "paquete", "etiqueta": "Paquete"}, {"clave": "permission", "tipo": "texto", "etiqueta": "Permiso", "defecto": "android.permission.WRITE_SECURE_SETTINGS"}]},
         {"id": "pm_revoke", "titulo": "Revocar permiso", "desc": "adb shell pm revoke <paquete> <permiso>", "accion": "pm_action", "args": {"action": "revoke"}, "campos": [{"clave": "package", "tipo": "paquete", "etiqueta": "Paquete"}, {"clave": "permission", "tipo": "texto", "etiqueta": "Permiso", "defecto": "android.permission.READ_LOGS"}]},
-        {"id": "dumpsys_package", "titulo": "Detalle de un paquete", "desc": "adb shell dumpsys package <paquete>", "accion": "dumpsys_package", "campos": [{"clave": "package", "tipo": "paquete", "etiqueta": "Paquete"}]}
+        {"id": "dumpsys_package", "titulo": "Detalle de un paquete", "desc": "adb shell dumpsys package <paquete>", "accion": "dumpsys_package", "campos": [{"clave": "package", "tipo": "paquete", "etiqueta": "Paquete"}]},
+        {"id": "pm_users", "titulo": "Usuarios y perfiles", "desc": "adb shell pm list users (id de cada usuario; el 0 es el principal, que es el que usan «Desinstalar (usuario 0)» y los presets)", "accion": "custom", "args": {"command": "shell pm list users"}},
+        {"id": "pm_appops_get", "titulo": "Ver permisos finos (appops)", "desc": "adb shell cmd appops get <paquete> [<operación>] · el modo real (allow/ignore/deny/foreground) de cada operación de la app; ve mucho más que «pm grant»", "accion": "appops_get", "campos": [
+          {"clave": "package", "tipo": "paquete", "etiqueta": "Paquete (ej. com.example.app)", "defecto": ""},
+          {"clave": "op", "tipo": "texto", "etiqueta": "Operación (vacío = todas, ej. SYSTEM_ALERT_WINDOW)", "defecto": "", "opcional": true}]},
+        {"id": "pm_appops_set", "titulo": "Cambiar permiso fino (appops)", "desc": "adb shell cmd appops set <paquete> <operación> <allow|ignore|deny|default> · para lo que «pm grant» no cubre: SYSTEM_ALERT_WINDOW, GET_USAGE_STATS, RUN_IN_BACKGROUND…", "accion": "appops_set", "peligro": true, "confirmar": true, "advertencia": "Los nombres de operación se sacan de «Ver permisos finos (appops)»: si te inventas uno, el móvil responde «Error: Unknown operation string». Quitar una operación que la app necesita puede dejarla sin funcionar; «default» lo deshace.", "campos": [
+          {"clave": "package", "tipo": "paquete", "etiqueta": "Paquete (ej. com.example.app)", "defecto": ""},
+          {"clave": "op", "tipo": "texto", "etiqueta": "Operación (nombre exacto)", "defecto": "SYSTEM_ALERT_WINDOW"},
+          {"clave": "mode", "tipo": "select", "etiqueta": "Modo", "defecto": "allow", "opciones": [{"valor": "allow", "etiqueta": "allow (permitir)"}, {"valor": "ignore", "etiqueta": "ignore (denegar en silencio)"}, {"valor": "deny", "etiqueta": "deny (denegar con error)"}, {"valor": "default", "etiqueta": "default (volver al valor del sistema)"}]}]}
       ]
     },
     {
@@ -156,7 +164,7 @@
       "icono": "⚙️",
       "desc": "settings, navegación, animaciones, densidad, tamaño y rotación.",
       "comandos": [
-        {"id": "settings_put", "titulo": "Cambiar ajuste (settings put)", "desc": "adb shell settings put <espacio> <clave> <valor>", "accion": "settings_put", "campos": [
+        {"id": "settings_put", "titulo": "Cambiar ajuste (settings put)", "desc": "adb shell settings put <espacio> <clave> <valor>", "accion": "settings_put", "peligro": true, "confirmar": true, "advertencia": "Escribe directamente en la base de datos de ajustes: una clave o un valor mal puestos pueden dejar la interfaz inservible. Anota el valor anterior con «Leer ajuste» antes de cambiarlo.", "campos": [
           {"clave": "space", "tipo": "select", "etiqueta": "Espacio", "defecto": "global", "opciones": [{"valor": "secure", "etiqueta": "secure"}, {"valor": "global", "etiqueta": "global"}, {"valor": "system", "etiqueta": "system"}]},
           {"clave": "key", "tipo": "texto", "etiqueta": "Clave", "defecto": "stay_on_while_plugged_in"},
           {"clave": "value", "tipo": "texto", "etiqueta": "Valor", "defecto": "7"}]},
@@ -173,14 +181,17 @@
         {"id": "anim_half", "titulo": "Animaciones 0.5x", "desc": "settings put global *_animation_scale 0.5", "accion": "anim_scale", "args": {"scale": "0.5"}},
         {"id": "anim_off", "titulo": "Desactivar animaciones", "desc": "settings put global *_animation_scale 0 (sistema más fluido)", "accion": "anim_scale", "args": {"scale": "0.0"}},
         {"id": "anim_reset", "titulo": "Restablecer animaciones", "desc": "settings put global *_animation_scale 1.0", "accion": "anim_scale", "args": {"scale": "1.0"}},
-        {"id": "density", "titulo": "Cambiar densidad (DPI)", "desc": "adb shell wm density <dpi>", "accion": "density", "campos": [{"clave": "dpi", "tipo": "numero", "etiqueta": "DPI", "defecto": "420"}]},
+        {"id": "density", "titulo": "Cambiar densidad (DPI)", "desc": "adb shell wm density <dpi>", "accion": "density", "peligro": true, "confirmar": true, "advertencia": "Un DPI absurdo deja la interfaz ilegible; usa «Restablecer DPI nativo» para volver atrás.", "campos": [{"clave": "dpi", "tipo": "numero", "etiqueta": "DPI", "defecto": "420"}]},
         {"id": "density_reset", "titulo": "Restablecer DPI nativo", "desc": "adb shell wm density reset", "accion": "density_reset"},
         {"id": "wm_size", "titulo": "Cambiar tamaño de pantalla", "desc": "adb shell wm size WxH (usa 'Restablecer tamaño' si la pantalla queda mal)", "accion": "wm_size", "peligro": true, "confirmar": true, "campos": [{"clave": "size", "tipo": "texto", "etiqueta": "Tamaño WxH", "defecto": "1080x2400"}]},
         {"id": "wm_size_reset", "titulo": "Restablecer tamaño", "desc": "adb shell wm size reset", "accion": "wm_size_reset"},
         {"id": "rotation", "titulo": "Rotación de pantalla", "desc": "settings put system accelerometer_rotation / user_rotation", "accion": "rotation", "campos": [{"clave": "mode", "tipo": "select", "etiqueta": "Rotación", "defecto": "auto", "opciones": [{"valor": "auto", "etiqueta": "Automática"}, {"valor": "0", "etiqueta": "Bloquear vertical (0°)"}, {"valor": "90", "etiqueta": "Bloquear 90°"}, {"valor": "180", "etiqueta": "Bloquear 180°"}, {"valor": "270", "etiqueta": "Bloquear 270°"}]}]},
         {"id": "overlay_list", "titulo": "Listar overlays (RRO)", "desc": "adb shell cmd overlay list", "accion": "overlay_list"},
         {"id": "overlay_enable", "titulo": "Activar overlay", "desc": "adb shell cmd overlay enable <paquete>", "accion": "overlay_enable", "campos": [{"clave": "package", "tipo": "paquete", "etiqueta": "Paquete del overlay"}]},
-        {"id": "overlay_disable", "titulo": "Desactivar overlay", "desc": "adb shell cmd overlay disable <paquete>", "accion": "overlay_disable", "campos": [{"clave": "package", "tipo": "paquete", "etiqueta": "Paquete del overlay"}]}
+        {"id": "overlay_disable", "titulo": "Desactivar overlay", "desc": "adb shell cmd overlay disable <paquete>", "accion": "overlay_disable", "campos": [{"clave": "package", "tipo": "paquete", "etiqueta": "Paquete del overlay"}]},
+        {"id": "brightness_get", "titulo": "Ver brillo de pantalla", "desc": "adb shell cmd display get-brightness --unit percentage (el mismo número que marca el deslizador; sin --unit devuelve 0.0-1.0)", "accion": "brightness_get"},
+        {"id": "brightness_set", "titulo": "Cambiar brillo de pantalla", "desc": "adb shell cmd display set-brightness <0-100> --unit percentage", "accion": "brightness_set", "advertencia": "Con el brillo automático activado el móvil volverá a moverlo en cuanto cambie la luz del ambiente.", "campos": [
+          {"clave": "nivel", "tipo": "numero", "etiqueta": "Brillo (0-100 %)", "defecto": "50"}]}
       ]
     },
     {
@@ -243,7 +254,8 @@
         {"id": "sb_collapse", "titulo": "Cerrar panel", "desc": "cmd statusbar collapse", "accion": "statusbar", "args": {"what": "collapse"}},
         {"id": "open_url", "titulo": "Abrir URL en el celular", "desc": "am start -a android.intent.action.VIEW -d <url>", "accion": "open_url", "campos": [{"clave": "url", "tipo": "texto", "etiqueta": "URL", "defecto": "https://github.com/The-Gekko"}]},
         {"id": "open_settings", "titulo": "Abrir Ajustes", "desc": "am start -a android.settings.SETTINGS", "accion": "am_start", "args": {"intent": "android.settings.SETTINGS"}},
-        {"id": "open_dev", "titulo": "Abrir Opciones de desarrollador", "desc": "am start -a android.settings.APPLICATION_DEVELOPMENT_SETTINGS", "accion": "am_start", "args": {"intent": "android.settings.APPLICATION_DEVELOPMENT_SETTINGS"}}
+        {"id": "open_dev", "titulo": "Abrir Opciones de desarrollador", "desc": "am start -a android.settings.APPLICATION_DEVELOPMENT_SETTINGS", "accion": "am_start", "args": {"intent": "android.settings.APPLICATION_DEVELOPMENT_SETTINGS"}},
+        {"id": "dismiss_keyguard", "titulo": "Quitar la pantalla de bloqueo", "desc": "adb shell wm dismiss-keyguard (retira la pantalla de bloqueo)", "accion": "custom", "args": {"command": "shell wm dismiss-keyguard"}, "advertencia": "No salta el PIN, el patrón ni la huella: con bloqueo seguro solo deja el móvil en la pantalla que pide el código."}
       ]
     },
     {
@@ -261,7 +273,11 @@
         {"id": "stayon", "titulo": "Pantalla siempre encendida (cargando)", "desc": "svc power stayon true", "accion": "svc", "args": {"what": "stayon"}},
         {"id": "stayoff", "titulo": "Pantalla: apagado normal", "desc": "svc power stayon false", "accion": "svc", "args": {"what": "stayoff"}},
         {"id": "ime_list", "titulo": "Listar teclados (IME)", "desc": "adb shell ime list -s", "accion": "ime_list"},
-        {"id": "ime_set", "titulo": "Elegir teclado (IME)", "desc": "adb shell ime set <id>", "accion": "ime_set", "campos": [{"clave": "ime", "tipo": "texto", "etiqueta": "Id (paquete/.Servicio)", "defecto": "com.google.android.inputmethod.latin/com.android.inputmethod.latin.LatinIME"}]}
+        {"id": "ime_set", "titulo": "Elegir teclado (IME)", "desc": "adb shell ime set <id>", "accion": "ime_set", "campos": [{"clave": "ime", "tipo": "texto", "etiqueta": "Id (paquete/.Servicio)", "defecto": "com.google.android.inputmethod.latin/com.android.inputmethod.latin.LatinIME"}]},
+        {"id": "net_policy", "titulo": "Datos en segundo plano: consultar", "desc": "adb shell cmd netpolicy get restrict-background / list restrict-background-blacklist|whitelist / list wifi-networks", "accion": "netpolicy", "advertencia": "Las listas devuelven UID numéricos, no nombres de paquete: crúzalos con «Detalle de un paquete» (dumpsys package) para saber de quién son.", "campos": [
+          {"clave": "what", "tipo": "select", "etiqueta": "Qué consultar", "defecto": "status", "opciones": [{"valor": "status", "etiqueta": "Estado del Ahorro de datos"}, {"valor": "blacklist", "etiqueta": "UID con datos en 2.º plano bloqueados"}, {"valor": "whitelist", "etiqueta": "UID con datos en 2.º plano permitidos"}, {"valor": "wifi", "etiqueta": "Redes Wi-Fi y si cuentan como medidas"}]}]},
+        {"id": "net_restrict_set", "titulo": "Ahorro de datos: activar o desactivar", "desc": "adb shell cmd netpolicy set restrict-background <true|false> (el interruptor global de Ahorro de datos)", "accion": "netpolicy_restrict", "confirmar": true, "advertencia": "Afecta a TODAS las apps que no estén en la lista blanca: con true dejan de recibir mensajes y correo por datos móviles mientras no las tengas abiertas.", "campos": [
+          {"clave": "estado", "tipo": "select", "etiqueta": "Ahorro de datos", "defecto": "true", "opciones": [{"valor": "true", "etiqueta": "true (activar: corta los datos en 2.º plano)"}, {"valor": "false", "etiqueta": "false (desactivar)"}]}]}
       ]
     },
     {
@@ -284,7 +300,11 @@
           {"clave": "filter", "tipo": "texto", "etiqueta": "Filtro por texto (vacío = todo)", "defecto": "", "opcional": true}]},
         {"id": "logcat_clear", "titulo": "Limpiar búfer logcat", "desc": "adb logcat -c", "accion": "logcat_clear"},
         {"id": "screenshot", "titulo": "Capturar pantalla", "desc": "adb exec-out screencap -p → ~/Imágenes/screenshot_gekko_<fecha>.png", "accion": "screenshot"},
-        {"id": "screenrecord", "titulo": "Grabar pantalla (sin scrcpy)", "desc": "adb shell screenrecord --time-limit N → ~/Vídeos/screenrecord_gekko_<fecha>.mp4", "accion": "screenrecord", "campos": [{"clave": "seconds", "tipo": "numero", "etiqueta": "Segundos (1-180)", "defecto": "10"}]}
+        {"id": "screenrecord", "titulo": "Grabar pantalla (sin scrcpy)", "desc": "adb shell screenrecord --time-limit N → ~/Vídeos/screenrecord_gekko_<fecha>.mp4", "accion": "screenrecord", "campos": [{"clave": "seconds", "tipo": "numero", "etiqueta": "Segundos (1-180)", "defecto": "10"}]},
+        {"id": "db_deviceidle", "titulo": "Doze y ahorro de energía", "desc": "adb shell dumpsys deviceidle (en qué fase de Doze está el móvil, cuánto falta para la siguiente y qué apps están exentas)", "accion": "dumpsys", "args": {"servicio": "deviceidle"}},
+        {"id": "db_batterystats", "titulo": "Consumo por app (batterystats)", "desc": "adb shell dumpsys batterystats (quién gasta batería desde la última carga completa)", "accion": "dumpsys", "args": {"servicio": "batterystats"}, "advertencia": "La salida son miles de líneas y tarda unos segundos: llena el panel entero. Si solo quieres guardarla, usa «Generar bugreport»."},
+        {"id": "db_uptime", "titulo": "Tiempo encendido y carga", "desc": "adb shell uptime (tiempo desde el último arranque y carga media de 1, 5 y 15 min)", "accion": "custom", "args": {"command": "shell uptime"}},
+        {"id": "db_services", "titulo": "Servicios del sistema", "desc": "adb shell service list (todos los servicios vivos y su interfaz; es la lista de los dumpsys que existen en TU móvil)", "accion": "custom", "args": {"command": "shell service list"}}
       ]
     },
     {
@@ -299,6 +319,82 @@
         {"id": "sc_record", "titulo": "Grabar MP4", "desc": "scrcpy --record=~/Vídeos/scrcpy_<fecha>.mp4", "accion": "scrcpy", "args": {"mode": "record"}},
         {"id": "sc_audio", "titulo": "Audio AAC", "desc": "scrcpy --audio-codec=aac (Android 11+)", "accion": "scrcpy", "args": {"mode": "audio"}},
         {"id": "sc_otg", "titulo": "Modo OTG", "desc": "scrcpy --otg (teclado/mouse físico)", "accion": "scrcpy", "args": {"mode": "otg"}}
+      ]
+    },
+    {
+      "id": "gaming",
+      "titulo": "Gaming (jugar en la PC)",
+      "icono": "🎮",
+      "desc": "Convierte el móvil en una consola: la pantalla se ve en el PC y se juega con teclado, ratón o mando reales (scrcpy 2.7+; los botones que piden 3.x lo avisan).",
+      "comandos": [
+        {"id": "game_kbm", "titulo": "Modo Gaming (teclado y ratón)", "desc": "scrcpy -m 1080 -b 9M --video-codec=h264 --keyboard=uhid --mouse=uhid (añade --video-encoder=... solo si rellenas el codificador). Con uhid el ratón queda CAPTURADO, como en un juego de PC: LAlt, LSuper o RSuper lo devuelven al escritorio. Antes de la primera partida pasa por «Configurar teclado físico» o las teclas saldrán cambiadas. Requiere scrcpy 2.7+.", "accion": "scrcpy_game", "args": {"mode": "kbm", "keyboard": "uhid", "mouse": "uhid"}, "campos": [
+          {"clave": "max_size", "tipo": "numero", "etiqueta": "Resolución máxima (-m, px)", "defecto": "1080"},
+          {"clave": "bitrate", "tipo": "texto", "etiqueta": "Bitrate (-b, ej. 9M)", "defecto": "9M"},
+          {"clave": "codec", "tipo": "select", "etiqueta": "Códec de vídeo", "defecto": "h264", "opciones": [{"valor": "h264", "etiqueta": "h264 (el más compatible)"}, {"valor": "h265", "etiqueta": "h265 (más calidad por bit)"}, {"valor": "av1", "etiqueta": "av1 (solo móviles nuevos)"}]},
+          {"clave": "encoder", "tipo": "texto", "etiqueta": "Codificador (--video-encoder)", "defecto": "", "opcional": true},
+          {"clave": "max_fps", "tipo": "numero", "etiqueta": "FPS máximos (--max-fps)", "defecto": "", "opcional": true},
+          {"clave": "fullscreen", "tipo": "select", "etiqueta": "Pantalla completa (-f)", "defecto": "", "opcional": true, "opciones": [{"valor": "", "etiqueta": "No"}, {"valor": "1", "etiqueta": "Sí"}]},
+          {"clave": "screen_off", "tipo": "select", "etiqueta": "Apagar la pantalla del móvil (-S, ahorra batería)", "defecto": "", "opcional": true, "opciones": [{"valor": "", "etiqueta": "No"}, {"valor": "1", "etiqueta": "Sí"}]}]},
+        {"id": "game_pad", "titulo": "Gaming con mando", "desc": "scrcpy -m 1080 -b 9M --video-codec=h264 --keyboard=uhid --mouse=uhid --gamepad=uhid: el mando que tienes en el PC (USB o Bluetooth) aparece en el móvil como un mando físico, sin apps intermedias. Requiere scrcpy 3.1+ (--gamepad); usa aoa si el móvil está por USB y uhid falla.", "accion": "scrcpy_game", "args": {"mode": "gamepad", "keyboard": "uhid", "mouse": "uhid"}, "campos": [
+          {"clave": "max_size", "tipo": "numero", "etiqueta": "Resolución máxima (-m, px)", "defecto": "1080"},
+          {"clave": "bitrate", "tipo": "texto", "etiqueta": "Bitrate (-b, ej. 9M)", "defecto": "9M"},
+          {"clave": "codec", "tipo": "select", "etiqueta": "Códec de vídeo", "defecto": "h264", "opciones": [{"valor": "h264", "etiqueta": "h264 (el más compatible)"}, {"valor": "h265", "etiqueta": "h265 (más calidad por bit)"}, {"valor": "av1", "etiqueta": "av1 (solo móviles nuevos)"}]},
+          {"clave": "encoder", "tipo": "texto", "etiqueta": "Codificador (--video-encoder)", "defecto": "", "opcional": true},
+          {"clave": "max_fps", "tipo": "numero", "etiqueta": "FPS máximos (--max-fps)", "defecto": "", "opcional": true},
+          {"clave": "gamepad", "tipo": "select", "etiqueta": "Mando (--gamepad)", "defecto": "uhid", "opciones": [{"valor": "uhid", "etiqueta": "uhid (recomendado)"}, {"valor": "aoa", "etiqueta": "aoa (solo USB)"}]}]},
+        {"id": "game_virtual", "titulo": "Juego en pantalla virtual", "desc": "scrcpy --new-display=1920x1080 --start-app=<paquete> --keyboard=uhid --mouse=uhid: el juego corre en una pantalla virtual con resolución de PC y el móvil queda libre para otras cosas. Deja la resolución vacía para copiar la de la pantalla real (--new-display a secas). Requiere scrcpy 3.0+ y Android 14+.", "accion": "scrcpy_game", "args": {"mode": "virtual", "keyboard": "uhid", "mouse": "uhid"}, "campos": [
+          {"clave": "new_display", "tipo": "texto", "etiqueta": "Pantalla virtual (1920x1080 o 1920x1080/420)", "defecto": "1920x1080", "opcional": true},
+          {"clave": "package", "tipo": "paquete", "etiqueta": "App a lanzar (--start-app)", "defecto": "", "opcional": true},
+          {"clave": "bitrate", "tipo": "texto", "etiqueta": "Bitrate (-b, ej. 9M)", "defecto": "9M"},
+          {"clave": "codec", "tipo": "select", "etiqueta": "Códec de vídeo", "defecto": "h264", "opciones": [{"valor": "h264", "etiqueta": "h264 (el más compatible)"}, {"valor": "h265", "etiqueta": "h265 (más calidad por bit)"}, {"valor": "av1", "etiqueta": "av1 (solo móviles nuevos)"}]},
+          {"clave": "encoder", "tipo": "texto", "etiqueta": "Codificador (--video-encoder)", "defecto": "", "opcional": true},
+          {"clave": "max_fps", "tipo": "numero", "etiqueta": "FPS máximos (--max-fps)", "defecto": "", "opcional": true},
+          {"clave": "gamepad", "tipo": "select", "etiqueta": "Mando (--gamepad, scrcpy 3.1+)", "defecto": "", "opcional": true, "opciones": [{"valor": "", "etiqueta": "Sin mando"}, {"valor": "uhid", "etiqueta": "uhid"}, {"valor": "aoa", "etiqueta": "aoa (solo USB)"}]}]},
+        {"id": "game_otg", "titulo": "Modo OTG (solo controles)", "desc": "scrcpy --otg --keyboard=aoa --mouse=aoa --gamepad=aoa: el PC hace de teclado, ratón y mando del móvil por el cable USB, sin vídeo y sin depuración ADB. Es lo que quieres cuando el móvil ya está en una TV o en un dock. Solo funciona por USB; LAlt/LSuper liberan el ratón. El --gamepad=aoa que lanza por defecto exige scrcpy 3.1+: con una versión anterior deja el mando en «Sin mando» o scrcpy no arrancará.", "accion": "scrcpy_game", "args": {"mode": "otg", "keyboard": "aoa", "mouse": "aoa"}, "campos": [
+          {"clave": "gamepad", "tipo": "select", "etiqueta": "Mando (--gamepad, scrcpy 3.1+)", "defecto": "aoa", "opcional": true, "opciones": [{"valor": "aoa", "etiqueta": "aoa (mando por USB)"}, {"valor": "", "etiqueta": "Sin mando"}]}]},
+        {"id": "game_lowlat", "titulo": "Latencia mínima (juegos de reflejos)", "desc": "scrcpy -m 720 -b 4M --video-codec=h264 --max-fps=60 --video-buffer=0 --no-audio --keyboard=uhid --mouse=uhid: menos píxeles, menos bits y cero búfer para que el disparo salga cuando aprietas. --video-buffer necesita scrcpy 3.0+ (antes se llamaba --display-buffer).", "accion": "scrcpy_game", "args": {"mode": "lowlat", "keyboard": "uhid", "mouse": "uhid", "no_audio": true}, "campos": [
+          {"clave": "max_size", "tipo": "numero", "etiqueta": "Resolución máxima (-m, px)", "defecto": "720"},
+          {"clave": "bitrate", "tipo": "texto", "etiqueta": "Bitrate (-b, ej. 4M)", "defecto": "4M"},
+          {"clave": "codec", "tipo": "select", "etiqueta": "Códec de vídeo", "defecto": "h264", "opciones": [{"valor": "h264", "etiqueta": "h264 (el más compatible)"}, {"valor": "h265", "etiqueta": "h265 (más calidad por bit)"}, {"valor": "av1", "etiqueta": "av1 (solo móviles nuevos)"}]},
+          {"clave": "encoder", "tipo": "texto", "etiqueta": "Codificador (--video-encoder)", "defecto": "", "opcional": true},
+          {"clave": "max_fps", "tipo": "numero", "etiqueta": "FPS máximos (--max-fps)", "defecto": "60"},
+          {"clave": "video_buffer", "tipo": "numero", "etiqueta": "Búfer de vídeo (--video-buffer, ms)", "defecto": "0"}]},
+        {"id": "game_encoders", "titulo": "Listar codificadores", "desc": "scrcpy --list-encoders: muestra aquí mismo los codificadores de vídeo y audio de TU móvil. Copia el nombre exacto (por ejemplo c2.android.avc.encoder) al campo Codificador de los botones de arriba: ese nombre cambia de un móvil a otro.", "accion": "scrcpy_list", "args": {"what": "encoders"}},
+        {"id": "game_apps", "titulo": "Listar apps del móvil", "desc": "scrcpy --list-apps: muestra el nombre de paquete de cada app instalada, que es justo lo que pide --start-app en el juego en pantalla virtual. Necesita una versión de scrcpy con --start-app (3.0+).", "accion": "scrcpy_list", "args": {"what": "apps"}},
+        {"id": "game_kbd_layout", "titulo": "Configurar teclado físico", "desc": "am start -a android.settings.HARD_KEYBOARD_SETTINGS: abre en el móvil Ajustes → Sistema → Idiomas e introducción → Teclado físico. Hay que elegir ahí la distribución UNA vez: sin eso, --keyboard=uhid manda las teclas cambiadas (WASD incluido).", "accion": "am_start", "args": {"intent": "android.settings.HARD_KEYBOARD_SETTINGS"}}
+      ]
+    },
+    {
+      "id": "rendimiento",
+      "titulo": "Rendimiento y Juegos",
+      "icono": "⚡",
+      "desc": "Lo que se toca en el móvil para que un juego vaya mejor: el Modo de juego de Android (Android 12+), la tasa de refresco, el estado térmico y la recompilación de la app. Para jugar desde el PC, mira la sección Gaming.",
+      "comandos": [
+        {"id": "perf_game_mode", "titulo": "Modo de juego de Android", "desc": "adb shell cmd game mode <standard|performance|battery> <paquete> · performance pide al sistema que priorice fluidez y battery que priorice autonomía (Android 12+)", "accion": "game_mode", "advertencia": "Solo funciona con apps declaradas como juego. Con cualquier otra el móvil responde «Package X is not of game type, to use the game mode commands, it must specify game category in the manifest as android:appCategory=\"game\"» y no cambia nada; la app marca ese rechazo como error para que no parezca que sí ha hecho algo.", "campos": [
+          {"clave": "mode", "tipo": "select", "etiqueta": "Modo", "defecto": "performance", "opciones": [{"valor": "standard", "etiqueta": "standard (el de siempre)"}, {"valor": "performance", "etiqueta": "performance (más fluidez)"}, {"valor": "battery", "etiqueta": "battery (más autonomía)"}]},
+          {"clave": "package", "tipo": "paquete", "etiqueta": "Juego (ej. com.miHoYo.GenshinImpact)", "defecto": ""}]},
+        {"id": "perf_game_modes", "titulo": "Modos de juego disponibles", "desc": "adb shell cmd game list-modes <paquete> (qué modos admite ese juego y cuál tiene puesto ahora)", "accion": "game_list", "args": {"what": "modes"}, "advertencia": "Solo responde con apps declaradas como juego (android:appCategory=\"game\" en su manifiesto); con el resto contesta «Package X is not of game type…».", "campos": [
+          {"clave": "package", "tipo": "paquete", "etiqueta": "Juego (ej. com.miHoYo.GenshinImpact)", "defecto": ""}]},
+        {"id": "perf_game_configs", "titulo": "Ajustes finos del juego (actuales)", "desc": "adb shell cmd game list-configs <paquete> (el reescalado y los FPS que tiene aplicados el modo custom)", "accion": "game_list", "args": {"what": "configs"}, "advertencia": "Solo responde con apps declaradas como juego (android:appCategory=\"game\" en su manifiesto); con el resto contesta «Package X is not of game type…».", "campos": [
+          {"clave": "package", "tipo": "paquete", "etiqueta": "Juego (ej. com.miHoYo.GenshinImpact)", "defecto": ""}]},
+        {"id": "perf_game_set", "titulo": "Ajuste fino del juego (reescalado y FPS)", "desc": "adb shell cmd game set --downscale <ratio> --fps <n> <paquete> · renderiza el juego a menos resolución y/o le pone un tope de FPS; deja un campo vacío y esa bandera no se envía", "accion": "game_set", "advertencia": "Solo funciona con apps declaradas como juego. Con cualquier otra el móvil responde «Package X is not of game type, to use the game mode commands, it must specify game category in the manifest as android:appCategory=\"game\"» y no cambia nada; la app marca ese rechazo como error para que no parezca que sí ha hecho algo. Además pone el juego en modo custom: para volver atrás usa «Restablecer el modo de juego».", "campos": [
+          {"clave": "downscale", "tipo": "select", "etiqueta": "Reescalado (--downscale)", "defecto": "0.75", "opcional": true, "opciones": [{"valor": "", "etiqueta": "No tocar"}, {"valor": "0.9", "etiqueta": "0.9"}, {"valor": "0.85", "etiqueta": "0.85"}, {"valor": "0.8", "etiqueta": "0.8"}, {"valor": "0.75", "etiqueta": "0.75"}, {"valor": "0.7", "etiqueta": "0.7"}, {"valor": "0.65", "etiqueta": "0.65"}, {"valor": "0.6", "etiqueta": "0.6"}, {"valor": "0.55", "etiqueta": "0.55"}, {"valor": "0.5", "etiqueta": "0.5 (la mitad)"}, {"valor": "0.45", "etiqueta": "0.45"}, {"valor": "0.4", "etiqueta": "0.4"}, {"valor": "0.35", "etiqueta": "0.35"}, {"valor": "0.3", "etiqueta": "0.3 (mínimo)"}, {"valor": "disable", "etiqueta": "disable (quitar el reescalado)"}]},
+          {"clave": "fps", "tipo": "numero", "etiqueta": "Tope de FPS (vacío = no tocar, 0 = quitar el tope)", "defecto": "", "opcional": true},
+          {"clave": "package", "tipo": "paquete", "etiqueta": "Juego (ej. com.miHoYo.GenshinImpact)", "defecto": ""}]},
+        {"id": "perf_game_reset", "titulo": "Restablecer el modo de juego", "desc": "adb shell cmd game reset <paquete> (deshace el modo y los ajustes finos y devuelve el juego a la configuración del móvil)", "accion": "game_reset", "advertencia": "Solo responde con apps declaradas como juego (android:appCategory=\"game\" en su manifiesto); con el resto contesta «Package X is not of game type…».", "campos": [
+          {"clave": "package", "tipo": "paquete", "etiqueta": "Juego (ej. com.miHoYo.GenshinImpact)", "defecto": ""}]},
+        {"id": "perf_refresh_get", "titulo": "Ver la tasa de refresco fijada", "desc": "adb shell settings get system min_refresh_rate y peak_refresh_rate · «null» significa que no hay nada forzado y decide el sistema", "accion": "refresh_rate", "args": {"op": "get"}},
+        {"id": "perf_refresh_put", "titulo": "Forzar tasa de refresco", "desc": "adb shell settings put system min_refresh_rate <Hz> y settings put system peak_refresh_rate <Hz> · las dos claves a la vez: fijar solo el pico deja que el móvil siga bajando la tasa", "accion": "refresh_rate", "args": {"op": "put"}, "confirmar": true, "advertencia": "Pon un valor que tu pantalla admita de verdad: los modos reales salen en «Pantallas (display)» (dumpsys display). Mantener la tasa alta gasta más batería; se deshace con «Restablecer la tasa de refresco».", "campos": [
+          {"clave": "hz", "tipo": "numero", "etiqueta": "Hz (60, 120…)", "defecto": "120"}]},
+        {"id": "perf_refresh_reset", "titulo": "Restablecer la tasa de refresco", "desc": "adb shell settings delete system min_refresh_rate y settings delete system peak_refresh_rate · se BORRAN las claves (no se escribe un número a mano) para que el móvil vuelva a decidir; después «Ver la tasa» debe responder «null»", "accion": "refresh_rate", "args": {"op": "delete"}},
+        {"id": "perf_gfxinfo", "titulo": "Fotogramas y tirones de una app", "desc": "adb shell dumpsys gfxinfo <paquete> (fotogramas dibujados, jank y percentiles 50/90/95/99 mientras la app está abierta)", "accion": "dumpsys_app", "args": {"servicio": "gfxinfo"}, "advertencia": "Mide desde la última vez que se reinició el contador: abre el juego, juega un rato y ENTONCES pulsa aquí, o saldrá «Total frames rendered: 0».", "campos": [
+          {"clave": "package", "tipo": "paquete", "etiqueta": "App o juego en marcha", "defecto": ""}]},
+        {"id": "perf_thermal", "titulo": "Estado térmico", "desc": "adb shell dumpsys thermalservice · «Thermal Status: 0» es sin limitar; cuanto más sube, más está frenando el móvil. Las líneas Temperature{mValue=…, mName=…} son cada sensor (AP, BAT, PA…)", "accion": "dumpsys", "args": {"servicio": "thermalservice"}},
+        {"id": "perf_compile", "titulo": "Recompilar app (dexopt)", "desc": "adb shell cmd package compile -m <speed|speed-profile|verify> -f <paquete> · vuelve a compilar el bytecode: «speed» compila todo (arranques y tirones mejores, más espacio) y «speed-profile» solo lo que se usa de verdad", "accion": "pkg_compile", "confirmar": true, "advertencia": "Tarda: en un juego grande son minutos con el móvil al máximo (el tiempo de espera de la app es de 15 min). No lo lances con poca batería y no desconectes el cable mientras trabaja.", "campos": [
+          {"clave": "filtro", "tipo": "select", "etiqueta": "Filtro (-m)", "defecto": "speed", "opciones": [{"valor": "speed", "etiqueta": "speed (compila todo)"}, {"valor": "speed-profile", "etiqueta": "speed-profile (solo lo usado)"}, {"valor": "verify", "etiqueta": "verify (solo verificar)"}]},
+          {"clave": "package", "tipo": "paquete", "etiqueta": "App o juego a recompilar", "defecto": ""}]},
+        {"id": "perf_compile_reset", "titulo": "Deshacer la recompilación", "desc": "adb shell cmd package compile --reset <paquete> (deja la app como recién instalada: borra los perfiles y el resultado del dexopt)", "accion": "pkg_compile", "args": {"reset": true}, "advertencia": "El primer arranque después de esto será más lento hasta que Android vuelva a optimizar la app por su cuenta.", "campos": [
+          {"clave": "package", "tipo": "paquete", "etiqueta": "App o juego", "defecto": ""}]}
       ]
     },
     {

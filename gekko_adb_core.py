@@ -272,12 +272,39 @@ def run_scrcpy(scrcpy_args):
         return _ok(f'Scrcpy lanzado: {" ".join(args) or "(default)"}')
     err = ''
     try:
-        err = proc.stderr.read().decode('utf-8', 'replace').strip()
+        # 'with' cierra el pipe: sin esto Python avisa de un ResourceWarning por
+        # cada lanzamiento fallido. Solo se cierra en esta rama, con el proceso
+        # ya muerto: cerrarlo con scrcpy vivo le daría SIGPIPE al escribir.
+        with proc.stderr:
+            err = proc.stderr.read().decode('utf-8', 'replace').strip()
     except Exception:
         pass
     if proc.returncode == 0:
         return _ok(f'Scrcpy terminó: {" ".join(args) or "(default)"}')
     return _fail(err or f'scrcpy terminó con código {proc.returncode}')
+
+
+def run_scrcpy_capture(scrcpy_args, timeout=60):
+    """Ejecuta scrcpy y CAPTURA su salida (--list-encoders, --list-apps).
+
+    run_scrcpy() lanza desacoplado y tira la salida: sirve para abrir una
+    ventana, no para leer un listado. scrcpy escribe parte de los listados
+    por stderr, así que en caso de éxito se juntan las dos salidas.
+    """
+    if not shutil.which(SCRCPY_EXEC):
+        return _fail('scrcpy no está instalado')
+    args = list(scrcpy_args)
+    serial = resolve_serial()
+    if serial:
+        args = ['-s', serial] + args
+    res = run([SCRCPY_EXEC] + args, timeout=timeout)
+    log_line(f'scrcpy {" ".join(args)} -> {"OK" if res["success"] else "FAIL"}')
+    if not res['success']:
+        return {'success': False, 'stdout': res['stdout'],
+                'stderr': res['stderr'] or f'scrcpy {" ".join(args)} falló'}
+    # El banner y los avisos salen por stderr y el listado por stdout: en ese orden.
+    salida = '\n'.join(t for t in (res['stderr'], res['stdout']) if t.strip())
+    return _ok(salida or '(sin salida)')
 
 
 # ----------------------------------------------------------------------
@@ -616,6 +643,14 @@ def _package(value):
     v = _need(value, 'paquete')
     if not _PKG_RE.match(v):
         raise ValueError(f'Nombre de paquete no válido: {v!r}')
+    return v
+
+
+def _opcion(value, nombre, validos):
+    """Valor OBLIGATORIO de lista cerrada (los _sc_* de Gaming aceptan vacío)."""
+    v = _need(value, nombre)
+    if v not in validos:
+        raise ValueError(f'{nombre} no válido: {v!r} (valores: {", ".join(validos)})')
     return v
 
 
@@ -1107,6 +1142,38 @@ def act_list_packages(filtro='-u'):
     return res
 
 
+_APPOPS_MODES = ('allow', 'ignore', 'deny', 'default')
+_APPOPS_OP_RE = re.compile(r'^[A-Za-z][A-Za-z0-9_:.]{0,63}$')
+
+
+def _appops_op(value):
+    v = _need(value, 'operación de appops')
+    if not _APPOPS_OP_RE.match(v):
+        raise ValueError(f'Operación de appops no válida: {v!r} '
+                         '(ejemplos: SYSTEM_ALERT_WINDOW, RUN_IN_BACKGROUND)')
+    return v
+
+
+def act_appops_get(package, op=''):
+    """cmd appops get <paquete> [<op>]: permisos finos, más allá de pm grant."""
+    args = ['shell', 'cmd', 'appops', 'get', _package(package)]
+    if op is not None and str(op).strip():
+        args.append(_appops_op(op))
+    res = run_adb(args, timeout=60)
+    if res['success'] and not res['stdout'].strip():
+        res['stdout'] = '(sin operaciones registradas para ese paquete)'
+    return res
+
+
+def act_appops_set(package, op, mode):
+    """cmd appops set <paquete> <op> <allow|ignore|deny|default>."""
+    res = _pm_result(run_adb(['shell', 'cmd', 'appops', 'set', _package(package),
+                              _appops_op(op), _opcion(mode, 'modo', _APPOPS_MODES)]))
+    if res['success'] and not res['stdout'].strip():
+        res['stdout'] = f'appops set {package} {op} {mode}: OK'
+    return res
+
+
 def _preset_packages(preset_spec):
     pkgs = preset_spec.get('paquetes')
     if not isinstance(pkgs, list) or not pkgs or not all(isinstance(p, str) and _PKG_RE.match(p) for p in pkgs):
@@ -1253,6 +1320,25 @@ def act_wm_size_reset():
     return run_adb(['shell', 'wm', 'size', 'reset'])
 
 
+def act_brightness_get():
+    """cmd display get-brightness --unit percentage (sin --unit devuelve 0.0-1.0)."""
+    res = run_adb(['shell', 'cmd', 'display', 'get-brightness', '--unit', 'percentage'])
+    valor = res['stdout'].strip()
+    if res['success'] and valor:
+        res['stdout'] = f'Brillo actual: {valor} %'
+    return res
+
+
+def act_brightness_set(nivel):
+    nivel = _sc_uint(nivel, 'Brillo')
+    if int(nivel) > 100:
+        return _fail(f'El brillo va de 0 a 100 % (recibido: {nivel})')
+    res = run_adb(['shell', 'cmd', 'display', 'set-brightness', nivel, '--unit', 'percentage'])
+    if res['success'] and not res['stdout'].strip():
+        res['stdout'] = f'Brillo fijado al {nivel} %'
+    return res
+
+
 _ROTATIONS = {'auto': None, '0': '0', '90': '1', '180': '2', '270': '3'}
 
 
@@ -1341,6 +1427,18 @@ def act_dumpsys(servicio, extra=None):
 
 def act_dumpsys_package(package):
     return run_adb(['shell', 'dumpsys', 'package', _package(package)], timeout=60)
+
+
+def act_dumpsys_app(servicio, package):
+    """dumpsys <servicio> <paquete>: gfxinfo y similares piden el paquete aparte.
+
+    act_dumpsys() recibe el 'extra' fijo del catálogo; aquí el paquete lo
+    escribe el usuario, así que pasa por _package().
+    """
+    servicio = _need(servicio, 'servicio')
+    if not re.match(r'^[\w./-]+$', servicio):
+        return _fail(f'Servicio no válido: {servicio!r}')
+    return run_adb(['shell', 'dumpsys', servicio, _package(package)], timeout=60)
 
 
 def act_battery_cmd(cmd):
@@ -1506,6 +1604,34 @@ def act_svc(what):
     return res
 
 
+_NETPOLICY_READS = {
+    'status': ['get', 'restrict-background'],
+    'blacklist': ['list', 'restrict-background-blacklist'],
+    'whitelist': ['list', 'restrict-background-whitelist'],
+    'wifi': ['list', 'wifi-networks'],
+}
+
+
+def act_netpolicy(what):
+    """Lecturas de 'cmd netpolicy' (datos en segundo plano y redes medidas)."""
+    args = _NETPOLICY_READS.get(what)
+    if args is None:
+        return _fail(f'Consulta de netpolicy desconocida: {what}')
+    res = run_adb(['shell', 'cmd', 'netpolicy'] + args, timeout=60)
+    if res['success'] and not res['stdout'].strip():
+        res['stdout'] = '(lista vacía)'
+    return res
+
+
+def act_netpolicy_restrict(estado):
+    """cmd netpolicy set restrict-background <true|false> (Ahorro de datos global)."""
+    estado = _opcion(estado, 'estado', ('true', 'false'))
+    res = run_adb(['shell', 'cmd', 'netpolicy', 'set', 'restrict-background', estado])
+    if res['success'] and not res['stdout'].strip():
+        res['stdout'] = f'Ahorro de datos (restrict-background): {estado}'
+    return res
+
+
 def act_statusbar(what):
     if what not in ('expand-notifications', 'expand-settings', 'collapse'):
         return _fail(f'Acción de barra de estado desconocida: {what}')
@@ -1533,6 +1659,278 @@ def act_scrcpy(mode):
     elif mode != 'standard':
         return _fail(f'Modo scrcpy desconocido: {mode}')
     return run_scrcpy(cmd)
+
+
+# ----------------------------------------------------------------------
+# Gaming: jugar en la PC con scrcpy (teclado, ratón y mando reales)
+#
+# Los valores llegan de la interfaz y acaban en un argv (nunca en un shell),
+# pero igual se validan: una bandera mal formada hace que scrcpy aborte y el
+# usuario solo vería "scrcpy terminó con código 1".
+
+_SC_GAME_MODES = ('kbm', 'gamepad', 'virtual', 'otg', 'lowlat')
+_SC_CODECS = ('h264', 'h265', 'av1', 'vp8', 'vp9')
+_SC_HID_MODES = ('disabled', 'sdk', 'uhid', 'aoa')
+_SC_PAD_MODES = ('disabled', 'uhid', 'aoa')
+_SC_BITRATE_RE = re.compile(r'^\d{1,12}[KM]?$', re.IGNORECASE)
+_SC_ENCODER_RE = re.compile(r'^[A-Za-z0-9][\w.-]*$')
+_SC_DISPLAY_RE = re.compile(r'^(\d{1,5}x\d{1,5})?(/\d{1,4})?$')
+# El primer carácter no puede ser un guion: '?--otg' llegaría como un solo
+# argumento (no hay inyección), pero es basura que scrcpy rechazaría a su modo.
+_SC_APPNAME_RE = re.compile(r'^[\w][\w .-]{0,99}$')
+
+
+def _sc_str(valor):
+    return str(valor).strip() if valor is not None else ''
+
+
+def _sc_choice(valor, nombre, validos):
+    """Valida un valor de lista cerrada; vacío significa "no pases la bandera"."""
+    v = _sc_str(valor)
+    if v and v not in validos:
+        raise ValueError(f'{nombre} no válido: {v!r} (valores: {", ".join(validos)})')
+    return v
+
+
+_SC_FALSOS = ('', '0', 'no', 'false', 'off')
+
+
+def _sc_bool(valor):
+    """Interruptor de la interfaz: vacío, '0', 'no', 'false' y 'off' = desactivado.
+
+    Un `if valor:` a secas daba por activado el '0' del select, así que
+    "No" encendía la bandera.
+    """
+    return _sc_str(valor).lower() not in _SC_FALSOS
+
+
+def _sc_uint(valor, nombre, maximo=None):
+    """Entero >= 0: un negativo aquí acabaría como '-m -5' y scrcpy abortaría.
+
+    Con `maximo` se acota también por arriba, igual que hacen la tasa de refresco
+    (1-480 Hz) y el brillo (0-100): un valor absurdo no tiene por qué llegar al móvil.
+    """
+    v = _int(valor, nombre)
+    if v.startswith('-'):
+        raise ValueError(f'{nombre} no puede ser negativo (recibido: {v})')
+    if maximo is not None and int(v) > maximo:
+        raise ValueError(f'{nombre} no puede pasar de {maximo} (recibido: {v})')
+    return v
+
+
+def _sc_bitrate(valor):
+    v = _sc_str(valor)
+    if not _SC_BITRATE_RE.match(v):
+        raise ValueError(f'Bitrate no válido: {v!r} (ejemplos: 9M, 4M, 9000000)')
+    return v.upper()
+
+
+def _sc_encoder(valor):
+    v = _sc_str(valor)
+    if not _SC_ENCODER_RE.match(v):
+        raise ValueError(f'Codificador no válido: {v!r} (ejemplo: c2.android.avc.encoder; '
+                         'míralos con "Listar codificadores")')
+    return v
+
+
+def _sc_new_display(valor):
+    """--new-display[=[<ancho>x<alto>][/<dpi>]]; vacío = tamaño y dpi de la pantalla real."""
+    v = _sc_str(valor)
+    if not v:
+        return '--new-display'
+    if v == '/' or not _SC_DISPLAY_RE.match(v):
+        raise ValueError(f'Pantalla virtual no válida: {v!r} '
+                         '(ejemplos: 1920x1080, 1920x1080/420, /240)')
+    return f'--new-display={v}'
+
+
+def _sc_start_app(valor):
+    """--start-app=[+][?]nombre: paquete exacto, o '?' para buscar por nombre."""
+    v = _sc_str(valor)
+    resto = v[1:] if v.startswith('+') else v
+    buscar = resto.startswith('?')
+    if buscar:
+        resto = resto[1:]
+    if buscar:
+        if not _SC_APPNAME_RE.match(resto):
+            raise ValueError(f'Nombre de app no válido: {v!r}')
+    elif not _PKG_RE.match(resto):
+        raise ValueError(f'Paquete no válido: {v!r} (usa el prefijo "?" para buscar por nombre, '
+                         'por ejemplo ?genshin)')
+    return f'--start-app={v}'
+
+
+def scrcpy_game_args(v):
+    """Construye la lista de banderas de scrcpy para los botones de Gaming.
+
+    Un campo vacío no genera bandera: nunca sale un '--video-encoder=' colgando.
+    """
+    modo = _sc_str(v.get('mode')) or 'kbm'
+    if modo not in _SC_GAME_MODES:
+        raise ValueError(f'Modo de gaming desconocido: {modo!r}')
+    args = []
+    if modo == 'otg':
+        # Sin vídeo ni adb: solo se inyectan teclado/ratón/mando por USB.
+        args.append('--otg')
+    else:
+        if _sc_str(v.get('max_size')):
+            args += ['-m', _sc_uint(v.get('max_size'), 'Resolución máxima')]
+        if _sc_str(v.get('bitrate')):
+            args += ['-b', _sc_bitrate(v.get('bitrate'))]
+        codec = _sc_choice(v.get('codec'), 'Códec de vídeo', _SC_CODECS)
+        if codec:
+            args.append(f'--video-codec={codec}')
+        if _sc_str(v.get('encoder')):
+            args.append(f'--video-encoder={_sc_encoder(v.get("encoder"))}')
+        if _sc_str(v.get('max_fps')):
+            args.append(f'--max-fps={_sc_uint(v.get("max_fps"), "FPS máximos")}')
+        if _sc_str(v.get('video_buffer')):
+            args.append(f'--video-buffer={_sc_uint(v.get("video_buffer"), "Búfer de vídeo")}')
+        if modo == 'virtual':
+            args.append(_sc_new_display(v.get('new_display')))
+        if _sc_str(v.get('package')):
+            args.append(_sc_start_app(v.get('package')))
+        if v.get('no_audio'):
+            args.append('--no-audio')
+        if _sc_bool(v.get('fullscreen')):
+            args.append('--fullscreen')
+        if _sc_bool(v.get('screen_off')):
+            args.append('--turn-screen-off')
+    teclado = _sc_choice(v.get('keyboard'), 'Teclado', _SC_HID_MODES)
+    if teclado:
+        args.append(f'--keyboard={teclado}')
+    raton = _sc_choice(v.get('mouse'), 'Ratón', _SC_HID_MODES)
+    if raton:
+        args.append(f'--mouse={raton}')
+    mando = _sc_choice(v.get('gamepad'), 'Mando', _SC_PAD_MODES)
+    if mando:
+        args.append(f'--gamepad={mando}')
+    return args
+
+
+def act_scrcpy_game(v):
+    return run_scrcpy(scrcpy_game_args(v))
+
+
+_SC_LISTS = {'encoders': '--list-encoders', 'apps': '--list-apps'}
+
+
+def act_scrcpy_list(what):
+    """Listados de scrcpy que hay que LEER, no lanzar en una ventana aparte."""
+    flag = _SC_LISTS.get(what)
+    if flag is None:
+        return _fail(f'Listado de scrcpy desconocido: {what}')
+    return run_scrcpy_capture([flag], timeout=90)
+
+
+# ----------------------------------------------------------------------
+# Rendimiento y juegos: Android Game Mode, tasa de refresco y dexopt
+#
+# TRAMPA de 'cmd game': solo acepta apps declaradas como juego
+# (android:appCategory="game" en el manifiesto). Con cualquier otra imprime
+# "Package X is not of game type…" y SALE CON CÓDIGO 0, así que sin leer la
+# salida el botón parecería haber funcionado.
+
+_GAME_MODES = ('standard', 'performance', 'battery')
+_GAME_LISTS = {'modes': 'list-modes', 'configs': 'list-configs'}
+# Valores admitidos por 'cmd game set --downscale' (los imprime su propia ayuda).
+_GAME_DOWNSCALE = ('0.3', '0.35', '0.4', '0.45', '0.5', '0.55', '0.6', '0.65',
+                   '0.7', '0.75', '0.8', '0.85', '0.9', 'disable')
+_GAME_NO_ES_JUEGO = 'is not of game type'
+
+
+def _game_result(res):
+    """Convierte el rechazo silencioso de 'cmd game' en un fallo visible."""
+    salida = (res['stdout'] + '\n' + res['stderr'])
+    if _GAME_NO_ES_JUEGO in salida:
+        res['success'] = False
+        res['stderr'] = (salida.strip() +
+                         '\n→ Solo las apps con android:appCategory="game" en su '
+                         'manifiesto aceptan los comandos de modo de juego.')
+    return res
+
+
+def act_game_mode(mode, package):
+    """cmd game mode <standard|performance|battery> <paquete>."""
+    return _game_result(run_adb(['shell', 'cmd', 'game', 'mode',
+                                 _opcion(mode, 'modo de juego', _GAME_MODES),
+                                 _package(package)]))
+
+
+def act_game_list(what, package):
+    """cmd game list-modes / list-configs <paquete>."""
+    sub = _GAME_LISTS.get(what)
+    if sub is None:
+        return _fail(f'Listado de modo de juego desconocido: {what}')
+    return _game_result(run_adb(['shell', 'cmd', 'game', sub, _package(package)]))
+
+
+def act_game_reset(package):
+    """cmd game reset <paquete>: devuelve la app a la configuración del móvil."""
+    return _game_result(run_adb(['shell', 'cmd', 'game', 'reset', _package(package)]))
+
+
+def act_game_set(downscale, fps, package):
+    """cmd game set [--downscale X] [--fps N] <paquete> (modo 'custom')."""
+    package = _package(package)
+    args = ['shell', 'cmd', 'game', 'set']
+    if downscale is not None and str(downscale).strip():
+        args += ['--downscale', _opcion(downscale, 'reescalado', _GAME_DOWNSCALE)]
+    if fps is not None and str(fps).strip():
+        # Cota superior como en sus vecinos (tasa de refresco 1-480, brillo 0-100):
+        # 0 quita el tope, y un valor absurdo no tiene por qué llegar al móvil.
+        args += ['--fps', _sc_uint(fps, 'FPS', maximo=1000)]
+    if len(args) == 4:
+        return _fail('Indica al menos un ajuste: reescalado o FPS')
+    return _game_result(run_adb(args + [package]))
+
+
+# min_refresh_rate y peak_refresh_rate viven en el espacio 'system' y van
+# siempre en pareja: fijar solo el pico deja al móvil bajar la tasa igual.
+_REFRESH_KEYS = ('min_refresh_rate', 'peak_refresh_rate')
+
+
+def act_refresh_rate(op, hz=''):
+    """Fija, lee o borra las dos claves de tasa de refresco.
+
+    'delete' es la forma correcta de restablecer: sin override el sistema
+    vuelve a decidir (settings get devuelve 'null', que es como vienen de
+    fábrica). Escribir un número "por defecto" a mano dejaría clavada una tasa
+    que no tiene por qué ser la del móvil.
+    """
+    if op not in ('put', 'get', 'delete'):
+        return _fail(f'Operación de tasa de refresco desconocida: {op}')
+    if op == 'put':
+        hz = _sc_uint(hz, 'Tasa de refresco')
+        if not 1 <= int(hz) <= 480:
+            return _fail(f'Tasa de refresco fuera de rango (1-480 Hz): {hz}')
+    lineas, ok = [], True
+    for key in _REFRESH_KEYS:
+        args = ['shell', 'settings', op, 'system', key] + ([hz] if op == 'put' else [])
+        res = run_adb(args)
+        ok = ok and res['success']
+        salida = (res['stdout'].strip() or res['stderr'].strip() or 'OK')
+        lineas.append(f'{key}: {salida}')
+    if ok and op == 'put':
+        lineas.append(f'Tasa de refresco forzada a {hz} Hz. Para volver al automático, '
+                      '«Restablecer la tasa de refresco» (settings delete).')
+    return {'success': ok, 'stdout': '\n'.join(lineas),
+            'stderr': '' if ok else 'settings falló en alguna de las dos claves'}
+
+
+# 'cmd package compile' es el dexopt manual: recompila el bytecode de la app.
+_COMPILE_FILTERS = ('speed', 'speed-profile', 'verify')
+
+
+def act_pkg_compile(package, filtro='speed', reset=False):
+    """cmd package compile -m <filtro> -f <paquete> (o --reset para deshacer)."""
+    package = _package(package)
+    if reset:
+        args = ['shell', 'cmd', 'package', 'compile', '--reset', package]
+    else:
+        args = ['shell', 'cmd', 'package', 'compile', '-m',
+                _opcion(filtro, 'filtro de compilación', _COMPILE_FILTERS), '-f', package]
+    return _pm_result(run_adb(args, timeout=900))
 
 
 def act_device_info():
@@ -1600,6 +1998,8 @@ _ACTIONS = {
     'debloat_preset': lambda v: act_debloat_preset(v['preset']),
     'restore_preset': lambda v: act_restore_preset(v['preset']),
     'list_packages': lambda v: act_list_packages(v.get('filtro', '-u')),
+    'appops_get': lambda v: act_appops_get(v.get('package'), v.get('op', '')),
+    'appops_set': lambda v: act_appops_set(v.get('package'), v.get('op'), v.get('mode')),
     'settings_put': lambda v: act_settings_put(v.get('space'), v.get('key'), v.get('value')),
     'settings_get': lambda v: act_settings_get(v.get('space'), v.get('key')),
     'settings_list': lambda v: act_settings_list(v.get('space')),
@@ -1610,6 +2010,8 @@ _ACTIONS = {
     'density_reset': lambda v: act_density_reset(),
     'wm_size': lambda v: act_wm_size(v.get('size')),
     'wm_size_reset': lambda v: act_wm_size_reset(),
+    'brightness_get': lambda v: act_brightness_get(),
+    'brightness_set': lambda v: act_brightness_set(v.get('nivel')),
     'rotation': lambda v: act_rotation(v.get('mode', 'auto')),
     'role_set': lambda v: act_role_set(v.get('role', 'android.app.role.HOME'), v.get('package', '')),
     'role_list': lambda v: act_role_list(),
@@ -1619,6 +2021,7 @@ _ACTIONS = {
     'input_swipe': lambda v: act_input_swipe(v.get('x1'), v.get('y1'), v.get('x2'), v.get('y2'), v.get('dur')),
     'dumpsys': lambda v: act_dumpsys(v.get('servicio'), v.get('extra')),
     'dumpsys_package': lambda v: act_dumpsys_package(v.get('package')),
+    'dumpsys_app': lambda v: act_dumpsys_app(v.get('servicio'), v.get('package')),
     'battery_cmd': lambda v: act_battery_cmd(v.get('cmd')),
     'top': lambda v: act_top(),
     'logcat_read': lambda v: act_logcat_read(v.get('level', 'V'), v.get('filter', '')),
@@ -1637,8 +2040,19 @@ _ACTIONS = {
     'overlay_enable': lambda v: act_overlay_toggle(v.get('package'), True),
     'overlay_disable': lambda v: act_overlay_toggle(v.get('package'), False),
     'svc': lambda v: act_svc(v.get('what')),
+    'netpolicy': lambda v: act_netpolicy(v.get('what')),
+    'netpolicy_restrict': lambda v: act_netpolicy_restrict(v.get('estado')),
     'statusbar': lambda v: act_statusbar(v.get('what')),
     'scrcpy': lambda v: act_scrcpy(v.get('mode', 'standard')),
+    'scrcpy_game': lambda v: act_scrcpy_game(v),
+    'scrcpy_list': lambda v: act_scrcpy_list(v.get('what')),
+    'game_mode': lambda v: act_game_mode(v.get('mode'), v.get('package')),
+    'game_list': lambda v: act_game_list(v.get('what'), v.get('package')),
+    'game_reset': lambda v: act_game_reset(v.get('package')),
+    'game_set': lambda v: act_game_set(v.get('downscale', ''), v.get('fps', ''), v.get('package')),
+    'refresh_rate': lambda v: act_refresh_rate(v.get('op', 'get'), v.get('hz', '')),
+    'pkg_compile': lambda v: act_pkg_compile(v.get('package'), v.get('filtro', 'speed'),
+                                             bool(v.get('reset'))),
     'device_info': lambda v: act_device_info(),
 }
 
@@ -1798,7 +2212,10 @@ def preset_buttons():
         specs.append({
             'id': f'preset_{p["id"]}',
             'titulo': f'{p.get("icono", "🧹")} {p["titulo"]}',
-            'desc': p.get('desc', '') + (f' ⚠ {adv}' if adv else ''),
+            # La advertencia NO se concatena aquí: la tarjeta y el diálogo de
+            # confirmación ya leen la clave 'advertencia' por su cuenta, y
+            # concatenarla la pintaba dos veces en el mismo botón.
+            'desc': p.get('desc', ''),
             'accion': 'debloat_preset',
             'args': {'preset': p},
             'peligro': True,

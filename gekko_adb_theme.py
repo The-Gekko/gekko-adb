@@ -111,6 +111,11 @@ window, .gekko-window {{
     color: @sub;
 }}
 
+.gekko-card label.card-warn {{
+    font-size: 11px;
+    color: @warn;
+}}
+
 button.cmd-btn {{
     background-color: @hover;
     color: @text;
