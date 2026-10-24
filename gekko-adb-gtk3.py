@@ -20,6 +20,8 @@ from gekko_adb_core import (
     APP_ID,
     APP_NAME,
     APP_VERSION,
+    AUTO_CONECTAR,
+    AutoArranque,
     CatalogoError,
     CommandWorker,
     cargar_config,
@@ -31,6 +33,7 @@ from gekko_adb_core import (
     preset_buttons,
     validar_campos,
     build_valores,
+    spec_auto_conectar,
 )
 from gekko_adb_theme import THEMES, get_theme_css, get_monitor_path
 
@@ -57,6 +60,13 @@ class GekkoAdbGtk3App(Gtk.Application):
         super().__init__(application_id=APP_ID + '.gtk3')
         self.config = cargar_config()
         self._theme = self.config.get('General', 'theme', fallback='system')
+        self._auto_modo = self.config.get('General', 'auto_conectar', fallback='')
+        if self._auto_modo not in AUTO_CONECTAR:
+            self._auto_modo = ''
+        self._auto = AutoArranque()
+        self._auto_source = 0
+        self._auto_sondeando = False
+        self._auto_conectado = False
         self._provider = None
         self._monitor = None
         self._monitor_source = 0
@@ -109,6 +119,7 @@ class GekkoAdbGtk3App(Gtk.Application):
         self._setup_theme_monitor()
         self._refresh_device()
         GLib.timeout_add_seconds(10, self._tick_refresh)
+        self._programar_auto()
 
     def _fatal(self, msg):
         print(f'ERROR: {msg}', file=sys.stderr)
@@ -177,6 +188,15 @@ class GekkoAdbGtk3App(Gtk.Application):
             combo.set_active(0)
         combo.connect('changed', self._on_theme_changed)
         bar.pack_start(combo, False, False, 0)
+
+        bar.pack_start(Gtk.Label(label='Al conectar:'), False, False, 0)
+        auto = Gtk.ComboBoxText()
+        for etiqueta in AUTO_CONECTAR.values():
+            auto.append_text(etiqueta)
+        auto.set_active(list(AUTO_CONECTAR).index(self._auto_modo))
+        auto.set_tooltip_text('Abre Gaming o QtScrcpy en cuanto conectas el móvil, por USB o por Wi-Fi')
+        auto.connect('changed', self._on_auto_changed)
+        bar.pack_start(auto, False, False, 0)
 
         version = Gtk.Label(label=f'v{APP_VERSION}')
         css(version, 'brand-sub')
@@ -469,6 +489,21 @@ class GekkoAdbGtk3App(Gtk.Application):
         self._theme_warned = False
         self._apply_theme(self._theme)
         self._setup_theme_monitor()
+
+    def _on_auto_changed(self, combo):
+        idx = combo.get_active()
+        if idx < 0 or idx >= len(AUTO_CONECTAR):
+            return
+        self._auto_modo = list(AUTO_CONECTAR)[idx]
+        self.config.set('General', 'auto_conectar', self._auto_modo)
+        err = guardar_config(self.config)
+        if err:
+            self._log(f'No se pudo guardar la configuración: {err}')
+        # Lo que ya está conectado al cambiar la opción no cuenta como «conectar».
+        self._auto.armar(self._auto_conectado)
+        self._programar_auto()
+        if self._auto_modo:
+            self._log(f'Al conectar el móvil: {AUTO_CONECTAR[self._auto_modo]}.')
 
     # Un comando normal dura milisegundos; solo los largos (recompilar una app,
     # bugreport, screenrecord, esperar dispositivo) merecen ofrecer cancelación.
@@ -926,6 +961,60 @@ class GekkoAdbGtk3App(Gtk.Application):
         if not self._poll_paused:
             self._refresh_device()
         return True
+
+    # ------------------------------------------------------- al conectar
+    # Sondeo propio de 2 s, y solo con la opción activa: el refresco normal es
+    # cada 10 s y lee batería, pantalla y roles, demasiado para «luego luego».
+    # Este solo pregunta `adb devices`, que no llega a tocar el móvil.
+    SEGUNDOS_SONDEO_AUTO = 2
+
+    def _programar_auto(self):
+        if self._auto_modo and not self._auto_source:
+            self._auto_source = GLib.timeout_add_seconds(self.SEGUNDOS_SONDEO_AUTO, self._tick_auto)
+        elif not self._auto_modo and self._auto_source:
+            GLib.source_remove(self._auto_source)
+            self._auto_source = 0
+
+    def _tick_auto(self):
+        if not self._auto_modo:
+            self._auto_source = 0
+            return False
+        if self._poll_paused or self._auto_sondeando:
+            return True
+        self._auto_sondeando = True
+
+        def _on_done(result):
+            GLib.idle_add(self._on_auto_sondeo, result, worker)
+
+        def _on_error(_err):
+            GLib.idle_add(self._on_auto_sondeo, {'success': False}, worker)
+
+        worker = CommandWorker({'id': 'auto', 'titulo': 'auto', 'desc': '', 'accion': 'devices_ready'},
+                               None, None, on_done=_on_done, on_error=_on_error)
+        self._workers.add(worker)
+        worker.start()
+        return True
+
+    def _on_auto_sondeo(self, result, worker):
+        self._workers.discard(worker)
+        self._auto_sondeando = False
+        if not result.get('success'):
+            return False
+        self._auto_conectado = bool((result.get('info') or {}).get('listos'))
+        if self._auto_modo and self._auto.actualizar(self._auto_conectado):
+            self._abrir_al_conectar()
+        return False
+
+    def _abrir_al_conectar(self):
+        self._refresh_device()
+        spec, valores = spec_auto_conectar(self._auto_modo, self._catalogo,
+                                           getattr(self, '_device_info', None))
+        if spec is None:
+            self._log(f'Móvil conectado, pero «{AUTO_CONECTAR[self._auto_modo]}» no se puede abrir '
+                      'con el scrcpy de este PC.', kind='error')
+            return
+        self._log(f'📱 Móvil conectado: {AUTO_CONECTAR[self._auto_modo]}…')
+        self._launch(spec, valores)
 
     # ----------------------------------------------------------------- theme
     def _apply_theme(self, theme):

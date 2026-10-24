@@ -31,7 +31,7 @@
 | 📦 **Instalación y transferencia** | APK, APK divididos (splits), varias apps a la vez, archivos y carpetas |
 | 🔌 **USB / Wi-Fi** | **Pasar a Wi-Fi en un clic** con el cable puesto, emparejamiento inalámbrico (`adb pair`), IP del teléfono, reconexión |
 | 📺 **Compartir pantalla** | Ver y manejar el móvil en el PC (scrcpy), en ventana o a pantalla completa y con el sonido donde quieras; grabación y captura de pantalla |
-| 🕹️ **Gaming en el PC** | Los juegos del móvil en el monitor, con **teclado, ratón y mando reales** (`uhid`/`aoa`), ventana o pantalla completa, **volumen en el PC**, pantalla virtual a resolución de PC y modo de latencia mínima |
+| 🕹️ **Gaming en el PC** | Los juegos del móvil en el monitor, con **teclado, ratón y mando reales** (`uhid`/`aoa`) o **teclas mapeadas a toques** (QtScrcpy) para los shooters, ventana o pantalla completa, **volumen en el PC**, **se abre solo al conectar el móvil**, pantalla virtual a resolución de PC y modo de latencia mínima |
 | ⚡ **Rendimiento y juegos** | Modo de juego de Android (`cmd game`), tasa de refresco forzada, estado térmico, fotogramas/jank y recompilación (dexopt) |
 | 🔧 **Ajustes finos del sistema** | Permisos `appops`, brillo por porcentaje, Ahorro de datos (`netpolicy`), Doze y consumo por app |
 | 🎮 **Control remoto** | Teclas, texto, toques, panel de notificaciones, abrir URL/ajustes, radios (svc) |
@@ -58,6 +58,11 @@ siempre desde la rama `main` de este repositorio.
   El launcher elige GTK 4 si está disponible y, si no, GTK 3.
 - `adb` (`android-tools`). `scrcpy` para espejo, grabación y la sección
   **Gaming** (ver más abajo: el mando pide scrcpy 3.1+ y la pantalla virtual 3.0+).
+- **Opcionales**, que el instalador no instala pero sí te avisa si faltan:
+  **QtScrcpy** para jugar a los shooters con teclas mapeadas
+  (`sudo pacman -S --needed qtscrcpy` desde Chaotic AUR, o su
+  [AppImage](https://github.com/barry-ran/QtScrcpy/releases)) y **`pactl`** para
+  los botones de volumen en el PC (casi todos los escritorios ya lo traen).
 
 En las dos vías el instalador detecta tu distribución por `/etc/os-release` y
 usa su gestor de paquetes:
@@ -245,7 +250,7 @@ Con la ventana abierta, **Alt+F** pasa de ventana a pantalla completa y vuelta.
 | `--print-backend` | Imprime `gtk4` o `gtk3` (el que se usaría) y sale, sin abrir la app |
 | `--diagnostics` | CLI sin GTK: ruta y versión de `adb`, `scrcpy`, GTK 3/4 disponibles y dispositivos; rc 1 si falta adb o GTK |
 | `--json` | CLI sin GTK: estado de conexión y dispositivo en JSON |
-| `--version` | `Gekko ADB Studio 2.2.0` |
+| `--version` | `Gekko ADB Studio 2.3.0` |
 | `--help`, `-h` | Ayuda |
 
 ### Variables de entorno
@@ -301,9 +306,20 @@ scrcpy -m 1080 -b 9M --video-codec=h264 --keyboard=uhid --mouse=uhid
 
 Con `--keyboard=uhid` y `--mouse=uhid` el móvil ve un teclado y un ratón
 **físicos**, no toques simulados: el puntero queda **capturado** en modo
-relativo, que es justo lo que hace jugable un shooter. Para devolver el ratón
-al escritorio, pulsa **LAlt**, **LSuper** o **RSuper** (vuelve a pulsar para
-capturarlo otra vez).
+relativo, que es lo que necesita un juego que admite ratón. Para devolver el
+ratón al escritorio, pulsa **LAlt**, **LSuper** o **RSuper** (vuelve a pulsar
+para capturarlo otra vez).
+
+### ¿Qué modo uso con cada juego?
+
+Gekko ADB le pasa al móvil un teclado, un ratón y un mando reales, pero **es el
+juego el que decide si los acepta**:
+
+| Tipo de juego | Qué usar |
+|---|---|
+| Admite mando, teclado o ratón (muchos de plataformas, lucha, carreras, emuladores…) | **Modo Gaming** o **Gaming con teclado, ratón y mando** |
+| Shooters que solo entienden toques (Free Fire, CoD Mobile, PUBG…) | **Jugar con teclas mapeadas (QtScrcpy)**: convierte teclas y ratón en toques, como un emulador. Puede ir contra las normas del juego y costar la cuenta |
+| Bloquea las Opciones de desarrollador (Fortnite) | **Modo OTG**, viendo el juego en el móvil. Fortnite admite mando |
 
 | Botón | Banderas que lanza | Requiere |
 |---|---|---|
@@ -311,6 +327,9 @@ capturarlo otra vez).
 | 🕹️ **Gaming con teclado, ratón y mando** | Lo mismo + `--gamepad=uhid` (o `aoa` si el móvil va por USB y `uhid` falla); sin mando conectado se juega igual con teclado y ratón | scrcpy 3.1+ |
 | 🖥️ **Juego en pantalla virtual** | `-b 9M --video-codec=h264 --new-display=1920x1080 --start-app=<paquete> --keyboard=uhid --mouse=uhid` | scrcpy 3.0+ y **Android 14+** |
 | ⚡ **Latencia mínima (juegos de reflejos)** | `-m 720 -b 4M --video-codec=h264 --max-fps=60 --video-buffer=0 --no-audio --keyboard=uhid --mouse=uhid` | scrcpy 3.0+ (`--video-buffer`) |
+| 🎯 **Jugar con teclas mapeadas (QtScrcpy)** | Abre QtScrcpy, que convierte cada tecla y el ratón en toques en su sitio | QtScrcpy |
+| 📦 **Instalar QtScrcpy** | `pkexec pacman -S --needed --noconfirm qtscrcpy` (pide confirmación y tu contraseña) | Arch con **Chaotic AUR** |
+| 🗂️ **Mapas de teclas de QtScrcpy** | Abre `~/.local/share/QtScrcpy/QtScrcpy/keymap` | Haber abierto QtScrcpy una vez |
 | 🔌 **Modo OTG (solo controles)** | `--otg --keyboard=aoa --mouse=aoa --gamepad=aoa`: el PC hace de teclado, ratón y mando por el cable, **sin vídeo y sin depuración ADB** | Solo USB; el mando, scrcpy 3.1+ |
 | 🔉 **Bajar volumen en el PC** / 🔊 **Subir volumen en el PC** | `pactl set-sink-input-volume <flujo de scrcpy> <n>%`, de 10 en 10 y entre 0 y 150 % | `pactl` (en Arch, paquete `libpulse`) |
 | 🎚️ **Volumen exacto en el PC** | Lo mismo con el valor que escribas (0 = silencio, 100 = normal) | `pactl` |
@@ -338,11 +357,56 @@ tocar el del móvil ni el de los demás programas. En plena partida, **LAlt**
 suelta el ratón para poder pulsarlos. Si falta `pactl`, el mezclador de volumen
 del escritorio también muestra *scrcpy* como una app más.
 
+### Teclas mapeadas con QtScrcpy
+
+Free Fire, CoD Mobile, PUBG y la mayoría de shooters de móvil **solo entienden
+toques**: con un teclado o un ratón «reales» no se puede andar con WASD ni
+apuntar. Los emuladores lo resuelven convirtiendo cada tecla en un toque en su
+sitio de la pantalla, y eso es lo que hace [QtScrcpy](https://github.com/barry-ran/QtScrcpy)
+(Apache-2.0) sobre tu móvil de verdad. Gekko ADB no reinventa ese mapeo: lo
+instala, lo abre y te dice cómo usarlo.
+
+1. **Instalar QtScrcpy** (una vez). En Arch lo instala desde Chaotic AUR con la
+   ventana de contraseña del sistema (`pkexec`); si no tienes Chaotic AUR,
+   GekkoApp lo activa en un clic. Si no aparece la ventana de contraseña (pasa
+   en algunos Hyprland/Niri sin agente de polkit), usa
+   `sudo pacman -S --needed qtscrcpy`. En otras distros, su
+   [AppImage](https://github.com/barry-ran/QtScrcpy/releases).
+2. **Jugar con teclas mapeadas.** En la ventana de QtScrcpy elige tu móvil (el
+   serial por USB o la IP:puerto por Wi-Fi), elige el mapa del juego y arranca
+   la transmisión. QtScrcpy no acepta argumentos, así que eso se hace en su
+   ventana.
+3. En la ventana del juego, la tecla del mapa (`switchKey`; en los de ejemplo es
+   `` ` ``, a la izquierda del 1 en un teclado inglés) activa o quita el mapeo. Con
+   un teclado español esa tecla es otra: si no responde, cámbiala en el `.json`.
+
+Cada juego necesita su mapa: un `.json` en
+`~/.local/share/QtScrcpy/QtScrcpy/keymap` (el botón **Mapas de teclas de
+QtScrcpy** abre la carpeta) con las posiciones de 0 a 1 sobre la pantalla. QtScrcpy
+trae ejemplos (PUBG/Game for Peace, Identity V…); para otro juego, copia uno y
+ajusta las posiciones a sus botones. El paquete de Chaotic AUR usa tu
+`/usr/bin/adb`, así que abrir QtScrcpy no reinicia el servidor adb ni corta la
+conexión por Wi-Fi.
+
+> ⚠️ **Mapear teclas a toques puede costar la cuenta.** Para los juegos
+> competitivos es software de terceros que da ventaja: Garena, por ejemplo, ya
+> ha baneado cuentas por apps de mapeo. Gekko ADB no oculta nada al juego.
+
+### Abrir el juego solo al conectar el móvil
+
+En la cabecera, **Al conectar** abre **Gaming** (con mando si tu scrcpy es 3.1+,
+si no con teclado y ratón) o **QtScrcpy** en cuanto conectas el móvil, por USB
+o por Wi-Fi. Viene apagado y se guarda en `~/.config/gekko-adb/config.ini`.
+Mientras está activo, Gekko ADB pregunta `adb devices` cada 2 segundos, sin
+tocar el móvil. Solo salta cuando aparece un móvil donde no había ninguno: no se
+repite mientras sigue conectado ni al pasar del cable a la Wi-Fi, y tampoco al
+activar la opción con el móvil ya puesto.
+
 > ⚠️ **Fortnite y los juegos que bloquean las Opciones de desarrollador.**
 > Epic no deja jugar a Fortnite en Android con las *Opciones de desarrollador*
 > activadas y avisa de que saltarse esa comprobación puede costar un baneo de la
-> cuenta. Cualquier botón con vídeo necesita la depuración USB o inalámbrica,
-> así que con esos juegos no hay espejo posible, y Gekko ADB no intenta
+> cuenta. Cualquier botón con vídeo (QtScrcpy incluido) necesita la depuración USB
+> o inalámbrica, así que con esos juegos no hay espejo posible, y Gekko ADB no intenta
 > ocultarles la depuración. Lo que sí funciona es el **Modo OTG**: no necesita
 > las Opciones de desarrollador, así que puedes apagarlas. El juego se ve en el
 > móvil (o en una TV o un monitor por HDMI, si tu móvil saca vídeo por USB-C) y
@@ -501,14 +565,14 @@ tests/fixtures/        Salidas reales de dumpsys battery, wm size/density y navi
 ## 🧪 Tests
 
 ```bash
-python3 -m unittest discover -s . -p 'test_*.py'   # 232 tests: core + tema + GTK 3 (225) y GTK 4 (7, se saltan aquí)
-python3 -m unittest test_ui_gtk4                   # 7 tests GTK 4, en su propio proceso
+python3 -m unittest discover -s . -p 'test_*.py'   # 260 tests: core + tema + GTK 3 (251) y GTK 4 (9, se saltan aquí)
+python3 -m unittest test_ui_gtk4                   # 9 tests GTK 4, en su propio proceso
 ```
 
-GTK 3 y GTK 4 no pueden cargarse en el mismo proceso: `discover` ejecuta 232
-tests y termina en `OK (skipped=7)` — 225 de core (211) + tema (9) + GTK 3 (5)
-más los 7 de GTK 4, que se saltan en ese proceso— y `test_ui_gtk4` se ejecuta
-aparte (7). Los tests de UI usan un display real: sin `DISPLAY` ni
+GTK 3 y GTK 4 no pueden cargarse en el mismo proceso: `discover` ejecuta 260
+tests y termina en `OK (skipped=9)` — 251 de core (235) + tema (9) + GTK 3 (7)
+más los 9 de GTK 4, que se saltan en ese proceso— y `test_ui_gtk4` se ejecuta
+aparte (9). Los tests de UI usan un display real: sin `DISPLAY` ni
 `WAYLAND_DISPLAY` se saltan.
 
 Los tests del núcleo usan un `adb` falso que registra el **argv exacto** de
@@ -546,6 +610,7 @@ por si quieres hacerlo a mano o saber qué necesita:
 | `xdg-user-dirs` | `xdg-user-dirs` | Detecta `~/Descargas`, `~/Imágenes`… según tu idioma (sin él la app usa `$HOME/Descargas` o `$HOME/Downloads` como respaldo) |
 | `curl` | `curl` | Solo para la vía por curl / modo standalone (descarga las fuentes); la app no lo usa |
 | `matugen` *(opcional)* | — (no está en los repos) | Tema dinámico sincronizado con tu wallpaper |
+| `qtscrcpy` *(opcional, Chaotic AUR)* | — (usa su AppImage) | Teclas mapeadas a toques para los shooters (botón **Instalar QtScrcpy** en Gaming) |
 | `libpulse` *(opcional)* | el paquete que traiga `pactl` (compruébalo con `which pactl`) | `pactl`, para los botones de volumen en el PC de la sección Gaming; casi todos los escritorios con PipeWire o PulseAudio ya lo traen |
 
 Instalación manual de las dependencias (Arch/Garuda):

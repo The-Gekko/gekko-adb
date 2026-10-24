@@ -24,7 +24,7 @@ from pathlib import Path
 
 APP_ID = 'com.gekko.adb'
 APP_NAME = 'Gekko ADB Studio'
-APP_VERSION = '2.2.0'
+APP_VERSION = '2.3.0'
 BASE_DIR = Path(os.environ.get('GEKKO_ADB_BASE', os.path.dirname(os.path.abspath(__file__))))
 
 CATALOGO_FILE = BASE_DIR / 'adb_commands.json'
@@ -2069,6 +2069,166 @@ def act_pc_volume(op, nivel=''):
 
 
 # ----------------------------------------------------------------------
+# Teclas mapeadas con QtScrcpy
+#
+# Los shooters de móvil (Free Fire, CoD Mobile, PUBG…) solo entienden toques: un
+# teclado o un ratón «reales» (uhid) no les sirven para andar ni apuntar. Los
+# emuladores convierten cada tecla en un toque en su sitio, y eso ya lo hace
+# QtScrcpy (Apache-2.0) sobre el móvil de verdad. Gekko ADB no reimplementa ese
+# mapeo: lo instala, lo abre y explica cómo se usa. QtScrcpy no acepta
+# argumentos (ni siquiera el serial): el móvil se elige en su propia ventana.
+#
+# El paquete de Chaotic AUR fija QTSCRCPY_ADB_PATH=/usr/bin/adb, el mismo adb
+# que usa Gekko ADB: no hay choque de versiones que reinicie el servidor adb y
+# tire la conexión por Wi-Fi.
+
+QTSCRCPY_EXEC = (os.environ.get('GEKKO_QTSCRCPY_EXECUTABLE') or shutil.which('qtscrcpy')
+                 or shutil.which('QtScrcpy') or 'qtscrcpy')
+QTSCRCPY_PAQUETE = 'qtscrcpy'
+QTSCRCPY_RELEASES = 'https://github.com/barry-ran/QtScrcpy/releases'
+DATA_HOME = Path(os.environ.get('XDG_DATA_HOME', os.path.expanduser('~/.local/share')))
+# QStandardPaths::AppDataLocation de QtScrcpy (organización y aplicación «QtScrcpy»).
+QTSCRCPY_KEYMAP_DIR = DATA_HOME / 'QtScrcpy' / 'QtScrcpy' / 'keymap'
+QTSCRCPY_LOG = LOG_DIR / 'qtscrcpy.log'
+
+_QTSCRCPY_PASOS = (
+    'Cómo jugar con teclas mapeadas:\n'
+    '  1. En QtScrcpy elige tu móvil: el serial si va por USB, o la IP:puerto si va por Wi-Fi.\n'
+    '  2. Elige el mapa de teclas del juego (los .json de la lista de keymaps).\n'
+    '  3. Arranca la transmisión desde QtScrcpy.\n'
+    '  4. En la ventana del juego, la tecla del mapa (switchKey; en los de ejemplo es `, a la\n'
+    '     izquierda del 1 en un teclado inglés) activa o quita el mapeo. Si con tu teclado no\n'
+    '     responde, cámbiala en el .json.\n'
+    '⚠ En juegos competitivos, mapear teclas a toques puede ir contra sus normas y costar la cuenta.')
+_QTSCRCPY_A_MANO = f'    sudo pacman -S --needed {QTSCRCPY_PAQUETE}'
+
+
+def act_qtscrcpy():
+    """Abre QtScrcpy desacoplado; espera 1,5 s para detectar un fallo inmediato."""
+    if not shutil.which(QTSCRCPY_EXEC):
+        return _fail('QtScrcpy no está instalado. Pulsa «Instalar QtScrcpy» (Arch con Chaotic AUR) '
+                     f'o descarga su AppImage de {QTSCRCPY_RELEASES}.')
+    # Su salida va a un archivo y no a un pipe: QtScrcpy escribe mucho log y,
+    # con un pipe que nadie lee, se quedaría bloqueado al llenarlo.
+    try:
+        LOG_DIR.mkdir(parents=True, exist_ok=True)
+        salida = open(QTSCRCPY_LOG, 'wb')
+    except OSError:
+        salida = subprocess.DEVNULL
+    try:
+        proc = subprocess.Popen([QTSCRCPY_EXEC], stdin=subprocess.DEVNULL, stdout=salida,
+                                stderr=salida, start_new_session=True)
+    except Exception as e:
+        return _fail(str(e))
+    finally:
+        if salida is not subprocess.DEVNULL:
+            salida.close()
+    try:
+        proc.wait(timeout=1.5)
+    except subprocess.TimeoutExpired:
+        return _ok('QtScrcpy abierto.\n' + _QTSCRCPY_PASOS)
+    # Es de instancia única: si ya estaba abierto, el segundo avisa al primero y sale con 0.
+    if proc.returncode == 0:
+        return _ok('QtScrcpy ya estaba abierto: se ha traído al frente.\n' + _QTSCRCPY_PASOS)
+    return _fail(f'QtScrcpy se cerró al arrancar (código {proc.returncode}); el detalle está en {QTSCRCPY_LOG}')
+
+
+def act_qtscrcpy_install():
+    """Instala QtScrcpy desde Chaotic AUR con pkexec (ventana de contraseña)."""
+    if shutil.which(QTSCRCPY_EXEC):
+        return _ok('QtScrcpy ya está instalado: pulsa «Jugar con teclas mapeadas».')
+    if not shutil.which('pacman'):
+        return _fail('Instalarlo desde aquí solo funciona en Arch y derivadas (pacman con Chaotic AUR). '
+                     f'En otras distros usa el AppImage de {QTSCRCPY_RELEASES}.')
+    if not run(['pacman', '-Si', QTSCRCPY_PAQUETE], timeout=30)['success']:
+        return _fail(f'El paquete {QTSCRCPY_PAQUETE} no está en tus repositorios: hace falta Chaotic AUR '
+                     f'(GekkoApp lo activa en un clic) o el AppImage de {QTSCRCPY_RELEASES}.')
+    if not shutil.which('pkexec'):
+        return _fail('Falta pkexec para pedir la contraseña. Instálalo en una terminal:\n' + _QTSCRCPY_A_MANO)
+    res = run(['pkexec', 'pacman', '-S', '--needed', '--noconfirm', QTSCRCPY_PAQUETE], timeout=1800)
+    if res['success']:
+        res['stdout'] = ((res['stdout'] + '\n') if res['stdout'] else '') + \
+            'QtScrcpy instalado: pulsa «Jugar con teclas mapeadas».'
+        return res
+    # Sin agente de polkit (algunos Hyprland/Niri) pkexec no puede pedir la
+    # contraseña; lo que falle, la terminal sigue siendo la salida.
+    res['stderr'] = ((res['stderr'] or 'pacman no pudo instalar QtScrcpy') +
+                     '\nSi no apareció la ventana de contraseña, instálalo en una terminal:\n' +
+                     _QTSCRCPY_A_MANO)
+    return res
+
+
+def act_qtscrcpy_keymaps():
+    """Abre en el gestor de archivos la carpeta de mapas de teclas de QtScrcpy."""
+    if not QTSCRCPY_KEYMAP_DIR.is_dir():
+        return _fail(f'Todavía no existe {QTSCRCPY_KEYMAP_DIR}: QtScrcpy la crea, con mapas de '
+                     'ejemplo, la primera vez que lo abres.')
+    explicacion = ('Cada .json es un juego: las posiciones van de 0 a 1 sobre la pantalla '
+                   '(0,5 = el centro) y switchKey es la tecla que activa el mapeo.')
+    if not shutil.which('xdg-open'):
+        return _ok(f'Tus mapas de teclas están en {QTSCRCPY_KEYMAP_DIR}. {explicacion}')
+    try:
+        subprocess.Popen(['xdg-open', str(QTSCRCPY_KEYMAP_DIR)], stdin=subprocess.DEVNULL,
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                         start_new_session=True)
+    except Exception as e:
+        return _fail(str(e))
+    return _ok(f'Abriendo {QTSCRCPY_KEYMAP_DIR}. {explicacion}')
+
+
+# ----------------------------------------------------------------------
+# Abrir el juego solo al conectar el móvil
+#
+# «Conectar» es pasar de no tener ningún móvil listo a tener alguno. Así no
+# salta al pasar del cable a la Wi-Fi (el móvil sigue conectado todo el rato) ni
+# se repite mientras siga enchufado; sí vuelve a saltar si se desconecta y vuelve.
+
+AUTO_CONECTAR = {'': 'No hacer nada', 'gaming': 'Abrir Gaming', 'qtscrcpy': 'Abrir QtScrcpy'}
+# El primero que el móvil y el scrcpy del PC admitan: con mando si se puede.
+_AUTO_GAMING = ('game_pad', 'game_kbm')
+
+
+class AutoArranque:
+    """Decide cuándo abrir el juego solo. No sabe nada de GTK ni de adb."""
+
+    def __init__(self):
+        self._habia = False
+
+    def armar(self, conectado):
+        """Al activar la opción, lo que ya estaba conectado no cuenta como «conectar»."""
+        self._habia = bool(conectado)
+
+    def actualizar(self, conectado):
+        """True justo cuando el móvil acaba de aparecer."""
+        conectado = bool(conectado)
+        aparece = conectado and not self._habia
+        self._habia = conectado
+        return aparece
+
+
+def spec_auto_conectar(modo, catalogo, info=None):
+    """(spec, valores por defecto) que abre «Al conectar», o (None, {}) si no hay nada que abrir."""
+    cmds = {c['id']: c for k in (catalogo or {}).get('categorias', []) for c in k.get('comandos', [])}
+    if modo == 'qtscrcpy':
+        candidatos = ('game_qtscrcpy',)
+    elif modo == 'gaming':
+        candidatos = _AUTO_GAMING
+    else:
+        return None, {}
+    for cid in candidatos:
+        spec = cmds.get(cid)
+        if spec and compatibilidad(spec, info)[0]:
+            return spec, {c['clave']: c.get('defecto', '') for c in spec.get('campos') or []}
+    return None, {}
+
+
+def act_devices_ready():
+    """Sondeo ligero para «Al conectar»: solo `adb devices`, nada que toque el móvil."""
+    listos = get_devices()
+    return {'success': True, 'stdout': '', 'stderr': '', 'info': {'listos': listos}}
+
+
+# ----------------------------------------------------------------------
 # Rendimiento y juegos: Android Game Mode, tasa de refresco y dexopt
 #
 # TRAMPA de 'cmd game': solo acepta apps declaradas como juego
@@ -2293,6 +2453,10 @@ _ACTIONS = {
     'scrcpy_game': lambda v: act_scrcpy_game(v),
     'scrcpy_list': lambda v: act_scrcpy_list(v.get('what')),
     'pc_volume': lambda v: act_pc_volume(v.get('op'), v.get('nivel', '')),
+    'qtscrcpy': lambda v: act_qtscrcpy(),
+    'qtscrcpy_install': lambda v: act_qtscrcpy_install(),
+    'qtscrcpy_keymaps': lambda v: act_qtscrcpy_keymaps(),
+    'devices_ready': lambda v: act_devices_ready(),
     'game_mode': lambda v: act_game_mode(v.get('mode'), v.get('package')),
     'game_list': lambda v: act_game_list(v.get('what'), v.get('package')),
     'game_reset': lambda v: act_game_reset(v.get('package')),
@@ -2488,12 +2652,13 @@ TIPOS_CAMPO = frozenset({'texto', 'numero', 'select', 'paquete',
 # cae del lado seguro, que es justo lo que aquí interesa.
 ACCIONES_LECTURA = frozenset({
     'appops_get', 'brightness_get', 'bugreport', 'device_info', 'device_ip',
-    'devices', 'dumpsys', 'dumpsys_app', 'dumpsys_package', 'extract_apk',
-    'forward_list', 'game_list', 'get_state', 'getprop', 'help', 'host_features',
-    'ime_list', 'list_packages', 'logcat_read', 'mdns_check', 'mdns_services',
-    'netpolicy', 'overlay_list', 'processes', 'pull', 'pull_merge', 'quick_pull',
-    'reverse_list', 'role_list', 'screenshot', 'scrcpy_list', 'settings_get',
-    'settings_list', 'storage', 'top', 'version', 'wait_for_device',
+    'devices', 'devices_ready', 'dumpsys', 'dumpsys_app', 'dumpsys_package',
+    'extract_apk', 'forward_list', 'game_list', 'get_state', 'getprop', 'help',
+    'host_features', 'ime_list', 'list_packages', 'logcat_read', 'mdns_check',
+    'mdns_services', 'netpolicy', 'overlay_list', 'processes', 'pull', 'pull_merge',
+    'qtscrcpy_keymaps', 'quick_pull', 'reverse_list', 'role_list', 'screenshot',
+    'scrcpy_list', 'settings_get', 'settings_list', 'storage', 'top', 'version',
+    'wait_for_device',
 })
 
 # De las que mutan, estas pueden dejar el móvil inservible, borrar datos, cortar
@@ -2691,7 +2856,7 @@ def preset_buttons():
 
 def cargar_config():
     cfg = configparser.ConfigParser()
-    cfg['General'] = {'theme': 'system', 'log_enabled': 'false'}
+    cfg['General'] = {'theme': 'system', 'log_enabled': 'false', 'auto_conectar': ''}
     if CONFIG_FILE.exists():
         try:
             with open(CONFIG_FILE, encoding='utf-8') as f:

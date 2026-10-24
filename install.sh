@@ -135,6 +135,7 @@ Tras instalar, desinstala con:
 Distribución detectada: $DISTRO
 Dependencias requeridas: ${REQUIRED_PACKAGES[*]}
 Dependencias opcionales: ${OPTIONAL_PACKAGES[*]} (tema Matugen)
+Herramientas opcionales: qtscrcpy (teclas mapeadas para shooters), pactl (volumen en el PC)
 EOF
 }
 
@@ -257,6 +258,23 @@ if $HAVE_PKG_MANAGER; then
     else
         warn "Matugen no está instalado (el tema matugen se desactivará automáticamente)."
     fi
+fi
+
+# Herramientas opcionales de la sección Gaming. Se mira el comando y no el
+# paquete: QtScrcpy puede venir como AppImage y pactl, de libpulse o de otro
+# paquete según la distro. Solo se informa: el instalador nunca las instala.
+if command -v qtscrcpy >/dev/null 2>&1 || command -v QtScrcpy >/dev/null 2>&1; then
+    ok "QtScrcpy presente (teclas mapeadas para los shooters)."
+else
+    info "QtScrcpy no está (opcional): convierte teclas en toques para Free Fire, CoD Mobile, PUBG…"
+    if [[ "$DISTRO" == "arch" ]]; then
+        info "    sudo pacman -S --needed qtscrcpy   (Chaotic AUR), o el botón «Instalar QtScrcpy» en Gaming"
+    else
+        info "    AppImage: https://github.com/barry-ran/QtScrcpy/releases"
+    fi
+fi
+if ! command -v pactl >/dev/null 2>&1; then
+    info "pactl no está (opcional): lo usan los botones de volumen en el PC de la sección Gaming."
 fi
 
 if [[ -x "$BIN_DIR/gekko-adb" ]]; then

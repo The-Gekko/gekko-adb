@@ -196,6 +196,49 @@ class TestGtk3(unittest.TestCase):
         finally:
             self.mod.Gtk.FileChooserNative = orig
 
+    def test_al_conectar_guarda_la_opcion_y_sondea(self):
+        app = self._activate()
+
+        class Selector:
+            def __init__(self, idx):
+                self.idx = idx
+
+            def get_active(self):
+                return self.idx
+
+        try:
+            app._on_auto_changed(Selector(1))
+            self.assertEqual(app._auto_modo, 'gaming')
+            self.assertEqual(app.config.get('General', 'auto_conectar'), 'gaming')
+            self.assertNotEqual(app._auto_source, 0, 'con la opción activa debe sondear')
+        finally:
+            app._on_auto_changed(Selector(0))
+        self.assertEqual(app._auto_modo, '')
+        self.assertEqual(app._auto_source, 0, 'apagada no debe quedar ningún sondeo')
+
+    def test_al_conectar_abre_gaming_una_sola_vez(self):
+        app = self._activate()
+        lanzados = []
+        app._launch = lambda spec, valores=None, flags=None: lanzados.append((spec['id'], valores))
+        app._refresh_device = lambda: None
+        app._auto_modo = 'gaming'
+        app._auto = self.core.AutoArranque()
+        try:
+            con = {'success': True, 'info': {'listos': ['R5CX905SJQD']}}
+            sin = {'success': True, 'info': {'listos': []}}
+            for res in (sin, con, con, sin, con):
+                app._on_auto_sondeo(res, None)
+            self.assertEqual([i for i, _ in lanzados], ['game_pad', 'game_pad'])
+            self.assertEqual(lanzados[0][1]['gamepad'], 'uhid')
+            # Un sondeo fallido (adb caído) no cuenta como desconectar.
+            app._on_auto_sondeo({'success': False}, None)
+            app._on_auto_sondeo(con, None)
+            self.assertEqual(len(lanzados), 2)
+        finally:
+            del app._launch
+            del app._refresh_device
+            app._auto_modo = ''
+
 
 if __name__ == '__main__':
     unittest.main()

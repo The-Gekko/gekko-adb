@@ -607,8 +607,9 @@ class TestGaming(Base):
         cats = [k for k in CAT['categorias'] if k['id'] == 'gaming']
         self.assertEqual(len(cats), 1, 'falta la categoría gaming')
         self.assertEqual([c['id'] for c in cats[0]['comandos']],
-                         ['game_kbm', 'game_pad', 'game_virtual', 'game_otg',
-                          'game_lowlat', 'game_vol_down', 'game_vol_up', 'game_vol_set',
+                         ['game_kbm', 'game_pad', 'game_qtscrcpy', 'game_qtscrcpy_install',
+                          'game_qtscrcpy_keymaps', 'game_virtual', 'game_otg', 'game_lowlat',
+                          'game_vol_down', 'game_vol_up', 'game_vol_set',
                           'game_encoders', 'game_apps', 'game_kbd_layout'])
 
     def test_compartir_pantalla_y_gaming_justo_tras_la_conexion(self):
@@ -1117,6 +1118,224 @@ class TestVolumenPC(Base):
         res, _ = self.run_spec('game_vol_up')
         self.assertFalse(res['success'])
         self.assertIn('Connection refused', res['stderr'])
+
+
+def _fake_qtscrcpy(nombre, cuerpo):
+    """QtScrcpy falso: registra que se lanzó (con sus argumentos) y hace `cuerpo`."""
+    ruta = Path(TMP) / nombre
+    ruta.write_text('#!/bin/bash\n'
+                    'printf \'%s\\n\' "$#" >> "$GEKKO_TEST_QTSCRCPY_LOG"\n' + cuerpo + '\n',
+                    encoding='utf-8')
+    ruta.chmod(0o755)
+    return str(ruta)
+
+
+class TestQtScrcpy(Base):
+    """Teclas mapeadas: Gekko ADB instala, abre y explica QtScrcpy; no mapea por su cuenta."""
+
+    def setUp(self):
+        super().setUp()
+        self.lanzados = Path(TMP) / 'qtscrcpy_lanzado.log'
+        if self.lanzados.exists():
+            self.lanzados.unlink()
+        os.environ['GEKKO_TEST_QTSCRCPY_LOG'] = str(self.lanzados)
+
+    def _con(self, ejecutable):
+        p = mock.patch.object(core, 'QTSCRCPY_EXEC', ejecutable)
+        p.start()
+        self.addCleanup(p.stop)
+
+    def test_sin_instalar_explica_como_conseguirlo(self):
+        self._con(os.path.join(TMP, 'no-existe-qtscrcpy'))
+        res, _ = self.run_spec('game_qtscrcpy')
+        self.assertFalse(res['success'])
+        self.assertIn('QtScrcpy no está instalado', res['stderr'])
+        self.assertIn('Instalar QtScrcpy', res['stderr'])
+
+    def test_abre_sin_argumentos_y_explica_los_pasos(self):
+        self._con(_fake_qtscrcpy('qtscrcpy-vivo', 'sleep 4'))
+        procesos = []
+        popen_real = core.subprocess.Popen
+
+        def espia(*a, **kw):
+            proc = popen_real(*a, **kw)
+            procesos.append(proc)
+            return proc
+
+        self.addCleanup(TestGaming._matar, procesos)
+        with mock.patch.object(core.subprocess, 'Popen', espia):
+            res, cs = self.run_spec('game_qtscrcpy')
+        self.assertTrue(res['success'], res['stderr'])
+        self.assertIn('QtScrcpy abierto', res['stdout'])
+        self.assertIn('mapa de teclas', res['stdout'])
+        self.assertIn('costar la cuenta', res['stdout'])
+        # QtScrcpy no acepta el serial: se lanza tal cual, sin argumentos.
+        self.assertEqual(self.lanzados.read_text().split(), ['0'])
+        self.assertEqual(cs, [], 'abrir QtScrcpy no pasa por adb')
+
+    def test_ya_abierto_se_trae_al_frente(self):
+        """Es de instancia única: el segundo avisa al primero y sale con 0."""
+        self._con(_fake_qtscrcpy('qtscrcpy-unico', 'exit 0'))
+        res, _ = self.run_spec('game_qtscrcpy')
+        self.assertTrue(res['success'], res['stderr'])
+        self.assertIn('ya estaba abierto', res['stdout'])
+
+    def test_si_se_cierra_al_arrancar_apunta_al_log(self):
+        self._con(_fake_qtscrcpy('qtscrcpy-roto', 'echo "Qt platform plugin missing" >&2; exit 3'))
+        res, _ = self.run_spec('game_qtscrcpy')
+        self.assertFalse(res['success'])
+        self.assertIn('código 3', res['stderr'])
+        self.assertIn(str(core.QTSCRCPY_LOG), res['stderr'])
+        self.assertIn('Qt platform plugin missing', core.QTSCRCPY_LOG.read_text())
+
+    # ---- instalar -------------------------------------------------------
+    def _instalar(self, hay=('pacman', 'pkexec'), si=True, pkexec=None):
+        """Ejecuta «Instalar QtScrcpy» con which() y run() simulados."""
+        llamadas = []
+
+        def which(nombre, *a, **kw):
+            return f'/usr/bin/{nombre}' if nombre in hay else None
+
+        def run(cmd, timeout=30):
+            llamadas.append(cmd)
+            if cmd[:2] == ['pacman', '-Si']:
+                return {'success': si, 'stdout': '', 'stderr': '' if si else 'error: package not found'}
+            return pkexec or {'success': True, 'stdout': 'instalando qtscrcpy', 'stderr': ''}
+
+        with mock.patch.object(core.shutil, 'which', which), mock.patch.object(core, 'run', run):
+            res = core.ejecutar(SPECS['game_qtscrcpy_install'], {}, [])
+        return res, llamadas
+
+    def test_instalar_pide_confirmacion(self):
+        self.assertTrue(core.necesita_confirmacion(SPECS['game_qtscrcpy_install']))
+        self.assertIn('contraseña', SPECS['game_qtscrcpy_install']['advertencia'])
+
+    def test_instalar_con_pkexec_desde_chaotic_aur(self):
+        res, llamadas = self._instalar()
+        self.assertTrue(res['success'], res['stderr'])
+        self.assertEqual(llamadas, [['pacman', '-Si', 'qtscrcpy'],
+                                    ['pkexec', 'pacman', '-S', '--needed', '--noconfirm', 'qtscrcpy']])
+        self.assertIn('QtScrcpy instalado', res['stdout'])
+
+    def test_ya_instalado_no_toca_pacman(self):
+        res, llamadas = self._instalar(hay=('pacman', 'pkexec', core.QTSCRCPY_EXEC))
+        self.assertTrue(res['success'])
+        self.assertIn('ya está instalado', res['stdout'])
+        self.assertEqual(llamadas, [])
+
+    def test_sin_pacman_manda_al_appimage(self):
+        res, llamadas = self._instalar(hay=('pkexec',))
+        self.assertFalse(res['success'])
+        self.assertIn('AppImage', res['stderr'])
+        self.assertEqual(llamadas, [])
+
+    def test_sin_chaotic_aur(self):
+        res, llamadas = self._instalar(si=False)
+        self.assertFalse(res['success'])
+        self.assertIn('Chaotic AUR', res['stderr'])
+        self.assertEqual(llamadas, [['pacman', '-Si', 'qtscrcpy']])
+
+    def test_sin_pkexec_da_el_comando_de_terminal(self):
+        res, llamadas = self._instalar(hay=('pacman',))
+        self.assertFalse(res['success'])
+        self.assertIn('sudo pacman -S --needed qtscrcpy', res['stderr'])
+        self.assertEqual(llamadas, [['pacman', '-Si', 'qtscrcpy']])
+
+    def test_pkexec_sin_agente_de_polkit(self):
+        fallo = {'success': False, 'stdout': '',
+                 'stderr': 'Error executing command as another user: No authentication agent found.'}
+        res, _ = self._instalar(pkexec=fallo)
+        self.assertFalse(res['success'])
+        self.assertIn('No authentication agent found', res['stderr'])
+        self.assertIn('sudo pacman -S --needed qtscrcpy', res['stderr'])
+
+    # ---- mapas de teclas --------------------------------------------------
+    def test_mapas_antes_de_abrir_qtscrcpy(self):
+        with mock.patch.object(core, 'QTSCRCPY_KEYMAP_DIR', Path(TMP) / 'sin-keymaps'):
+            res, _ = self.run_spec('game_qtscrcpy_keymaps')
+        self.assertFalse(res['success'])
+        self.assertIn('la primera vez que lo abres', res['stderr'])
+
+    def test_mapas_abre_la_carpeta(self):
+        carpeta = Path(TMP) / 'keymap'
+        carpeta.mkdir(exist_ok=True)
+        abiertos = []
+        with mock.patch.object(core, 'QTSCRCPY_KEYMAP_DIR', carpeta), \
+                mock.patch.object(core.shutil, 'which', lambda n, *a, **k: '/usr/bin/' + n), \
+                mock.patch.object(core.subprocess, 'Popen', lambda cmd, **kw: abiertos.append(cmd)):
+            res = core.ejecutar(SPECS['game_qtscrcpy_keymaps'], {}, [])
+        self.assertTrue(res['success'], res['stderr'])
+        self.assertEqual(abiertos, [['xdg-open', str(carpeta)]])
+        self.assertIn('switchKey', res['stdout'])
+
+    def test_solo_los_mapas_son_de_lectura(self):
+        self.assertTrue(core.es_lectura(SPECS['game_qtscrcpy_keymaps']))
+        self.assertFalse(core.es_lectura(SPECS['game_qtscrcpy']))
+        self.assertFalse(core.es_lectura(SPECS['game_qtscrcpy_install']))
+
+
+class TestAlConectar(Base):
+    """«Al conectar»: abrir el juego solo, justo cuando aparece el móvil."""
+
+    def test_salta_al_aparecer_el_movil_y_no_se_repite(self):
+        auto = core.AutoArranque()
+        self.assertEqual([auto.actualizar(c) for c in (False, True, True, True)],
+                         [False, True, False, False])
+
+    def test_vuelve_a_saltar_tras_desconectar(self):
+        auto = core.AutoArranque()
+        self.assertEqual([auto.actualizar(c) for c in (True, False, True)], [True, False, True])
+
+    def test_al_abrir_la_app_con_el_movil_ya_puesto_tambien_salta(self):
+        self.assertTrue(core.AutoArranque().actualizar(True))
+
+    def test_activar_la_opcion_con_el_movil_puesto_no_salta(self):
+        auto = core.AutoArranque()
+        auto.armar(True)
+        self.assertFalse(auto.actualizar(True))
+        # A partir de ahí funciona normal: desconectar y volver a conectar sí salta.
+        self.assertFalse(auto.actualizar(False))
+        self.assertTrue(auto.actualizar(True))
+
+    def test_pasar_de_cable_a_wifi_no_salta(self):
+        """Con el cable y la Wi-Fi a la vez, y luego solo la Wi-Fi: siempre hay móvil."""
+        auto = core.AutoArranque()
+        scenario('default')
+        self.assertTrue(auto.actualizar(core.act_devices_ready()['info']['listos']))
+        scenario('wifi')
+        self.assertFalse(auto.actualizar(core.act_devices_ready()['info']['listos']))
+
+    def test_sondeo_ligero_solo_pregunta_adb_devices(self):
+        res = core.act_devices_ready()
+        self.assertTrue(res['success'])
+        self.assertEqual(res['info']['listos'], ['SERIAL1'])
+        self.assertEqual(non_devices(calls()), [])
+        scenario('unauth')
+        self.assertEqual(core.act_devices_ready()['info']['listos'], ['SERIAL1'])
+        scenario('none')
+        self.assertEqual(core.act_devices_ready()['info']['listos'], [])
+
+    def test_gaming_prefiere_el_mando_si_scrcpy_llega(self):
+        with mock.patch.object(core, 'scrcpy_version', return_value=(5, 0)):
+            spec, valores = core.spec_auto_conectar('gaming', CAT)
+        self.assertEqual(spec['id'], 'game_pad')
+        self.assertEqual(valores, self.defectos('game_pad'))
+
+    def test_gaming_con_scrcpy_viejo_usa_teclado_y_raton(self):
+        with mock.patch.object(core, 'scrcpy_version', return_value=(2, 7)):
+            spec, valores = core.spec_auto_conectar('gaming', CAT)
+        self.assertEqual(spec['id'], 'game_kbm')
+        self.assertEqual(valores, self.defectos('game_kbm'))
+
+    def test_qtscrcpy_y_nada(self):
+        spec, valores = core.spec_auto_conectar('qtscrcpy', CAT)
+        self.assertEqual((spec['id'], valores), ('game_qtscrcpy', {}))
+        self.assertEqual(core.spec_auto_conectar('', CAT), (None, {}))
+        self.assertEqual(core.spec_auto_conectar('otra cosa', CAT), (None, {}))
+
+    def test_la_opcion_viene_apagada(self):
+        self.assertEqual(list(core.AUTO_CONECTAR)[0], '')
+        self.assertEqual(core.cargar_config().get('General', 'auto_conectar'), '')
 
 
 class TestRendimiento(Base):
