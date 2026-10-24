@@ -29,9 +29,9 @@
 | 🧹 **Presets de debloat** | Samsung, Xiaomi/HyperOS, MIUI y Google con un clic, cada uno con su botón **Restaurar** |
 | 👑 **Roles de sistema** | Launcher, SMS, teléfono y asistente por defecto |
 | 📦 **Instalación y transferencia** | APK, APK divididos (splits), varias apps a la vez, archivos y carpetas |
-| 🔌 **USB / Wi-Fi** | Servidor ADB, emparejamiento inalámbrico (`adb pair`), IP del teléfono, reconexión |
-| 📱 **scrcpy y screenrecord** | Espejo, grabación y captura de pantalla |
-| 🕹️ **Gaming en el PC** | Los juegos del móvil en el monitor, con **teclado, ratón y mando reales** (`uhid`/`aoa`), pantalla virtual a resolución de PC y modo de latencia mínima |
+| 🔌 **USB / Wi-Fi** | **Pasar a Wi-Fi en un clic** con el cable puesto, emparejamiento inalámbrico (`adb pair`), IP del teléfono, reconexión |
+| 📺 **Compartir pantalla** | Ver y manejar el móvil en el PC (scrcpy), en ventana o a pantalla completa y con el sonido donde quieras; grabación y captura de pantalla |
+| 🕹️ **Gaming en el PC** | Los juegos del móvil en el monitor, con **teclado, ratón y mando reales** (`uhid`/`aoa`), ventana o pantalla completa, **volumen en el PC**, pantalla virtual a resolución de PC y modo de latencia mínima |
 | ⚡ **Rendimiento y juegos** | Modo de juego de Android (`cmd game`), tasa de refresco forzada, estado térmico, fotogramas/jank y recompilación (dexopt) |
 | 🔧 **Ajustes finos del sistema** | Permisos `appops`, brillo por porcentaje, Ahorro de datos (`netpolicy`), Doze y consumo por app |
 | 🎮 **Control remoto** | Teclas, texto, toques, panel de notificaciones, abrir URL/ajustes, radios (svc) |
@@ -203,6 +203,39 @@ gekko-adb --diagnostics       # adb, scrcpy, GTK y dispositivos, sin abrir la ap
 ./install.sh --check          # diagnóstico del instalador sin escribir nada
 ```
 
+### Conectarse por Wi-Fi
+
+En **Conexión Inalámbrica** hay dos caminos:
+
+- **Con cable (cualquier Android):** conecta el móvil por USB, acepta la
+  depuración y pulsa **Pasar a Wi-Fi (con el cable puesto)**. Lee la IP del
+  móvil, ejecuta `adb tcpip 5555` y `adb connect <ip>:5555`, reintentando
+  mientras el móvil reinicia adbd. Luego quita el cable: todo lo demás (espejo,
+  gaming, consola) sigue por Wi-Fi. El modo TCP/IP se pierde al reiniciar el
+  móvil, así que después de un reinicio hay que repetirlo con el cable.
+- **Sin cable (Android 11+):** en el móvil, *Opciones de desarrollador →
+  Depuración inalámbrica → Vincular con código*. Pulsa **Emparejar** con la
+  IP:puerto y el código que salen ahí, y después **Conectar por IP** con la
+  IP:puerto que aparece arriba en *Depuración inalámbrica* (no es el mismo
+  puerto que el de vincular).
+
+El PC y el móvil tienen que estar en la misma red, y el router no debe aislar a
+los clientes entre sí (algunas redes de invitados lo hacen).
+
+### Ver el móvil en el PC
+
+**Compartir pantalla (scrcpy) → Ver el móvil en el PC** abre la pantalla del
+móvil en una ventana que manejas con tu ratón y tu teclado, por cable o por
+Wi-Fi. Antes de abrirla pregunta dos cosas, y lo que traen por defecto es lo
+mismo que hace scrcpy solo:
+
+| Campo | Opciones | Banderas |
+|---|---|---|
+| **Ventana** | En ventana (por defecto) · Pantalla completa · Ventana sin bordes | — · `--fullscreen` · `--window-borderless` |
+| **Sonido** (Android 11+) | En el PC, con el móvil en silencio (por defecto) · En el PC y en el móvil (Android 13+) · Solo en el móvil | — · `--audio-source=playback --audio-dup` · `--no-audio` |
+
+Con la ventana abierta, **Alt+F** pasa de ventana a pantalla completa y vuelta.
+
 ### Opciones del launcher (`bin/gekko-adb`)
 
 | Opción | Efecto |
@@ -212,7 +245,7 @@ gekko-adb --diagnostics       # adb, scrcpy, GTK y dispositivos, sin abrir la ap
 | `--print-backend` | Imprime `gtk4` o `gtk3` (el que se usaría) y sale, sin abrir la app |
 | `--diagnostics` | CLI sin GTK: ruta y versión de `adb`, `scrcpy`, GTK 3/4 disponibles y dispositivos; rc 1 si falta adb o GTK |
 | `--json` | CLI sin GTK: estado de conexión y dispositivo en JSON |
-| `--version` | `Gekko ADB Studio 2.1.0` |
+| `--version` | `Gekko ADB Studio 2.2.0` |
 | `--help`, `-h` | Ayuda |
 
 ### Variables de entorno
@@ -275,21 +308,46 @@ capturarlo otra vez).
 | Botón | Banderas que lanza | Requiere |
 |---|---|---|
 | 🎮 **Modo Gaming (teclado y ratón)** | `-m 1080 -b 9M --video-codec=h264 --keyboard=uhid --mouse=uhid` | scrcpy 2.7+ |
-| 🕹️ **Gaming con mando** | Lo mismo + `--gamepad=uhid` (o `aoa` si el móvil va por USB y `uhid` falla) | scrcpy 3.1+ |
+| 🕹️ **Gaming con teclado, ratón y mando** | Lo mismo + `--gamepad=uhid` (o `aoa` si el móvil va por USB y `uhid` falla); sin mando conectado se juega igual con teclado y ratón | scrcpy 3.1+ |
 | 🖥️ **Juego en pantalla virtual** | `-b 9M --video-codec=h264 --new-display=1920x1080 --start-app=<paquete> --keyboard=uhid --mouse=uhid` | scrcpy 3.0+ y **Android 14+** |
 | ⚡ **Latencia mínima (juegos de reflejos)** | `-m 720 -b 4M --video-codec=h264 --max-fps=60 --video-buffer=0 --no-audio --keyboard=uhid --mouse=uhid` | scrcpy 3.0+ (`--video-buffer`) |
 | 🔌 **Modo OTG (solo controles)** | `--otg --keyboard=aoa --mouse=aoa --gamepad=aoa`: el PC hace de teclado, ratón y mando por el cable, **sin vídeo y sin depuración ADB** | Solo USB; el mando, scrcpy 3.1+ |
+| 🔉 **Bajar volumen en el PC** / 🔊 **Subir volumen en el PC** | `pactl set-sink-input-volume <flujo de scrcpy> <n>%`, de 10 en 10 y entre 0 y 150 % | `pactl` (en Arch, paquete `libpulse`) |
+| 🎚️ **Volumen exacto en el PC** | Lo mismo con el valor que escribas (0 = silencio, 100 = normal) | `pactl` |
 | 🧾 **Listar codificadores** | `--list-encoders`, con la salida dentro de la app | — |
 | 📋 **Listar apps del móvil** | `--list-apps`: los nombres de paquete que pide `--start-app` | scrcpy 3.0+ |
 | ⌨️ **Configurar teclado físico** | `adb shell am start -a android.settings.HARD_KEYBOARD_SETTINGS` | — |
 
 Todos los campos son editables (resolución, bitrate, códec, FPS, codificador,
-pantalla completa, apagar la pantalla del móvil…) y **un campo opcional vacío
+ventana, sonido, apagar la pantalla del móvil…) y **un campo opcional vacío
 no genera bandera**: si dejas *Codificador* en blanco, el comando sale sin
 `--video-encoder` y lo elige scrcpy. La pantalla virtual admite
 `1920x1080`, `1920x1080/420` (con dpi) o vacío para copiar la pantalla real, y
 en *App a lanzar* el prefijo `?` busca por nombre aproximado (`?genshin`) y `+`
 fuerza detener la app antes (`+?genshin`).
+
+**Ventana y sonido.** Los botones con vídeo preguntan lo mismo que
+[Ver el móvil en el PC](#ver-el-móvil-en-el-pc): en ventana, a pantalla completa
+o sin bordes, y si el sonido sale en el PC, en los dos o solo en el móvil.
+*Latencia mínima* solo pregunta la ventana porque va sin audio a propósito.
+
+**Volumen en el PC.** scrcpy no tiene ninguna opción de volumen: reproduce el
+sonido del móvil como un programa más del escritorio. Los botones de volumen
+buscan ese flujo en PipeWire/PulseAudio con `pactl` y le cambian el volumen sin
+tocar el del móvil ni el de los demás programas. En plena partida, **LAlt**
+suelta el ratón para poder pulsarlos. Si falta `pactl`, el mezclador de volumen
+del escritorio también muestra *scrcpy* como una app más.
+
+> ⚠️ **Fortnite y los juegos que bloquean las Opciones de desarrollador.**
+> Epic no deja jugar a Fortnite en Android con las *Opciones de desarrollador*
+> activadas y avisa de que saltarse esa comprobación puede costar un baneo de la
+> cuenta. Cualquier botón con vídeo necesita la depuración USB o inalámbrica,
+> así que con esos juegos no hay espejo posible, y Gekko ADB no intenta
+> ocultarles la depuración. Lo que sí funciona es el **Modo OTG**: no necesita
+> las Opciones de desarrollador, así que puedes apagarlas. El juego se ve en el
+> móvil (o en una TV o un monitor por HDMI, si tu móvil saca vídeo por USB-C) y
+> juegas con el teclado, el ratón o el mando del PC, siempre que el juego los
+> admita.
 
 > ⚠️ **Configura el teclado físico UNA vez o las teclas saldrán cambiadas.**
 > Con `uhid`/`aoa` la distribución la decide el teléfono, no el PC: si no lo
@@ -443,12 +501,12 @@ tests/fixtures/        Salidas reales de dumpsys battery, wm size/density y navi
 ## 🧪 Tests
 
 ```bash
-python3 -m unittest discover -s . -p 'test_*.py'   # 202 tests: core + tema + GTK 3 (195) y GTK 4 (7, se saltan aquí)
+python3 -m unittest discover -s . -p 'test_*.py'   # 232 tests: core + tema + GTK 3 (225) y GTK 4 (7, se saltan aquí)
 python3 -m unittest test_ui_gtk4                   # 7 tests GTK 4, en su propio proceso
 ```
 
-GTK 3 y GTK 4 no pueden cargarse en el mismo proceso: `discover` ejecuta 202
-tests y termina en `OK (skipped=7)` — 195 de core (181) + tema (9) + GTK 3 (5)
+GTK 3 y GTK 4 no pueden cargarse en el mismo proceso: `discover` ejecuta 232
+tests y termina en `OK (skipped=7)` — 225 de core (211) + tema (9) + GTK 3 (5)
 más los 7 de GTK 4, que se saltan en ese proceso— y `test_ui_gtk4` se ejecuta
 aparte (7). Los tests de UI usan un display real: sin `DISPLAY` ni
 `WAYLAND_DISPLAY` se saltan.
@@ -488,6 +546,7 @@ por si quieres hacerlo a mano o saber qué necesita:
 | `xdg-user-dirs` | `xdg-user-dirs` | Detecta `~/Descargas`, `~/Imágenes`… según tu idioma (sin él la app usa `$HOME/Descargas` o `$HOME/Downloads` como respaldo) |
 | `curl` | `curl` | Solo para la vía por curl / modo standalone (descarga las fuentes); la app no lo usa |
 | `matugen` *(opcional)* | — (no está en los repos) | Tema dinámico sincronizado con tu wallpaper |
+| `libpulse` *(opcional)* | el paquete que traiga `pactl` (compruébalo con `which pactl`) | `pactl`, para los botones de volumen en el PC de la sección Gaming; casi todos los escritorios con PipeWire o PulseAudio ya lo traen |
 
 Instalación manual de las dependencias (Arch/Garuda):
 

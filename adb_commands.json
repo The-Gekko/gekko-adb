@@ -29,16 +29,85 @@
       "id": "conexion",
       "titulo": "Conexión Inalámbrica",
       "icono": "📶",
-      "desc": "ADB por Wi-Fi: emparejar (Android 11+), TCP/IP, conectarse y desconectarse por IP.",
+      "desc": "ADB por Wi-Fi. Con cable, «Pasar a Wi-Fi» lo hace todo en un clic; sin cable (Android 11+), «Emparejar» y después «Conectar por IP».",
       "comandos": [
+        {"id": "wifi_auto", "titulo": "Pasar a Wi-Fi (con el cable puesto)", "desc": "Con el cable USB puesto: lee la IP, abre el puerto 5555 y se conecta. Luego quita el cable y todo sigue por Wi-Fi. Misma red; repítelo si reinicias el móvil.", "accion": "wifi_auto", "args": {"port": "5555"}},
         {"id": "device_ip", "titulo": "IP Wi-Fi del celular", "desc": "ip addr show wlan0 (para usar en Conectar por IP)", "accion": "device_ip"},
-        {"id": "pair", "titulo": "Emparejar (Wi-Fi sin cable)", "desc": "adb pair <ip:puerto> <código> · Ajustes → Depuración inalámbrica → Vincular con código", "accion": "pair", "campos": [{"clave": "ip", "tipo": "texto", "etiqueta": "IP:puerto de emparejamiento", "defecto": "192.168.1.15:37000"}, {"clave": "code", "tipo": "numero", "etiqueta": "Código de 6 dígitos"}]},
+        {"id": "pair", "titulo": "Emparejar (Wi-Fi sin cable)", "desc": "Sin cable, Android 11+: Depuración inalámbrica → Vincular con código. Después, «Conectar por IP» con la IP:puerto de arriba en esa pantalla (no el de vincular).", "accion": "pair", "campos": [{"clave": "ip", "tipo": "texto", "etiqueta": "IP:puerto de emparejamiento", "defecto": "192.168.1.15:37000"}, {"clave": "code", "tipo": "numero", "etiqueta": "Código de 6 dígitos"}]},
         {"id": "tcpip", "titulo": "Activar puerto TCP/IP", "desc": "adb tcpip <puerto> (requiere cable USB la 1ª vez)", "accion": "tcpip", "campos": [{"clave": "port", "tipo": "numero", "etiqueta": "Puerto", "defecto": "5555"}]},
         {"id": "connect", "titulo": "Conectar por IP", "desc": "adb connect <ip:puerto> (marca error si adb responde 'failed to connect')", "accion": "connect", "campos": [{"clave": "ip", "tipo": "texto", "etiqueta": "IP del celular", "defecto": "192.168.1.15:5555"}]},
         {"id": "disconnect", "titulo": "Desconectar", "desc": "adb disconnect (vacío = todas las conexiones)", "accion": "disconnect", "campos": [{"clave": "ip", "tipo": "texto", "etiqueta": "IP (opcional)", "defecto": "", "opcional": true}]},
         {"id": "usb", "titulo": "Volver a USB", "desc": "adb usb (retorna al transporte USB)", "accion": "usb"},
         {"id": "mdns_check", "titulo": "Verificar mDNS", "desc": "adb mdns check (requiere platform-tools de Google; el adb de Arch no lo soporta)", "accion": "mdns_check"},
         {"id": "mdns_services", "titulo": "Servicios mDNS", "desc": "adb mdns services (requiere platform-tools de Google)", "accion": "mdns_services"}
+      ]
+    },
+    {
+      "id": "scrcpy",
+      "titulo": "Compartir pantalla (scrcpy)",
+      "icono": "📺",
+      "desc": "Ve y maneja el móvil en una ventana del PC, por cable o por Wi-Fi (conéctalo antes en «Conexión Inalámbrica»). Para jugar, mira la sección Gaming.",
+      "comandos": [
+        {"id": "sc_standard", "titulo": "Ver el móvil en el PC", "desc": "La pantalla del móvil en el PC, manejada con tu ratón y tu teclado. Eliges ventana o pantalla completa (Alt+F) y dónde suena.", "accion": "scrcpy", "args": {"mode": "standard"}, "campos": [
+          {"clave": "ventana", "tipo": "select", "etiqueta": "Ventana", "defecto": "", "opcional": true, "opciones": [{"valor": "", "etiqueta": "En ventana (Alt+F cambia a pantalla completa)"}, {"valor": "fullscreen", "etiqueta": "Pantalla completa (-f)"}, {"valor": "borderless", "etiqueta": "Ventana sin bordes"}]},
+          {"clave": "sonido", "tipo": "select", "etiqueta": "Sonido (Android 11+)", "defecto": "", "opcional": true, "opciones": [{"valor": "", "etiqueta": "En el PC (el móvil se calla)"}, {"valor": "pc_movil", "etiqueta": "En el PC y en el móvil (Android 13+)"}, {"valor": "movil", "etiqueta": "Solo en el móvil (sin audio en el PC)"}]}]},
+        {"id": "sc_screenoff", "titulo": "Pantalla apagada", "desc": "scrcpy --turn-screen-off", "accion": "scrcpy", "args": {"mode": "screenoff"}},
+        {"id": "sc_fps120", "titulo": "Ultra 120 FPS", "desc": "scrcpy --max-fps=120 --video-bit-rate=16M", "accion": "scrcpy", "args": {"mode": "fps120"}},
+        {"id": "sc_record", "titulo": "Grabar MP4", "desc": "scrcpy --record=~/Vídeos/scrcpy_<fecha>.mp4", "accion": "scrcpy", "args": {"mode": "record"}},
+        {"id": "sc_audio", "titulo": "Audio AAC", "desc": "scrcpy --audio-codec=aac (Android 11+)", "accion": "scrcpy", "args": {"mode": "audio"}},
+        {"id": "sc_otg", "titulo": "Modo OTG", "desc": "scrcpy --otg (teclado/mouse físico)", "accion": "scrcpy", "args": {"mode": "otg"}}
+      ]
+    },
+    {
+      "id": "gaming",
+      "titulo": "Gaming (jugar en la PC)",
+      "icono": "🎮",
+      "desc": "Convierte el móvil en una consola: el juego se ve en el PC, en ventana o a pantalla completa y con el sonido en el PC, y se juega con el teclado, el ratón o el mando del PC, que el móvil reconoce como reales. Va por cable o por Wi-Fi (scrcpy 2.7+; los botones que piden 3.x lo avisan).",
+      "comandos": [
+        {"id": "game_kbm", "titulo": "Modo Gaming (teclado y ratón)", "desc": "scrcpy -m 1080 -b 9M --video-codec=h264 --keyboard=uhid --mouse=uhid (añade --video-encoder=... solo si rellenas el codificador). Con uhid el ratón queda CAPTURADO, como en un juego de PC: LAlt, LSuper o RSuper lo devuelven al escritorio. Antes de la primera partida pasa por «Configurar teclado físico» o las teclas saldrán cambiadas. Requiere scrcpy 2.7+.", "accion": "scrcpy_game", "args": {"mode": "kbm", "keyboard": "uhid", "mouse": "uhid"}, "campos": [
+          {"clave": "max_size", "tipo": "numero", "etiqueta": "Resolución máxima (-m, px)", "defecto": "1080"},
+          {"clave": "bitrate", "tipo": "texto", "etiqueta": "Bitrate (-b, ej. 9M)", "defecto": "9M"},
+          {"clave": "codec", "tipo": "select", "etiqueta": "Códec de vídeo", "defecto": "h264", "opciones": [{"valor": "h264", "etiqueta": "h264 (el más compatible)"}, {"valor": "h265", "etiqueta": "h265 (más calidad por bit)"}, {"valor": "av1", "etiqueta": "av1 (solo móviles nuevos)"}]},
+          {"clave": "encoder", "tipo": "texto", "etiqueta": "Codificador (--video-encoder)", "defecto": "", "opcional": true},
+          {"clave": "max_fps", "tipo": "numero", "etiqueta": "FPS máximos (--max-fps)", "defecto": "", "opcional": true},
+          {"clave": "ventana", "tipo": "select", "etiqueta": "Ventana", "defecto": "", "opcional": true, "opciones": [{"valor": "", "etiqueta": "En ventana (Alt+F cambia a pantalla completa)"}, {"valor": "fullscreen", "etiqueta": "Pantalla completa (-f)"}, {"valor": "borderless", "etiqueta": "Ventana sin bordes"}]},
+          {"clave": "sonido", "tipo": "select", "etiqueta": "Sonido (Android 11+)", "defecto": "", "opcional": true, "opciones": [{"valor": "", "etiqueta": "En el PC (el móvil se calla)"}, {"valor": "pc_movil", "etiqueta": "En el PC y en el móvil (Android 13+)"}, {"valor": "movil", "etiqueta": "Solo en el móvil (sin audio en el PC)"}]},
+          {"clave": "screen_off", "tipo": "select", "etiqueta": "Apagar la pantalla del móvil (-S, ahorra batería)", "defecto": "", "opcional": true, "opciones": [{"valor": "", "etiqueta": "No"}, {"valor": "1", "etiqueta": "Sí"}]}]},
+        {"id": "game_pad", "titulo": "Gaming con teclado, ratón y mando", "desc": "scrcpy -m 1080 -b 9M --video-codec=h264 --keyboard=uhid --mouse=uhid --gamepad=uhid: los tres a la vez. El mando que tengas en el PC (USB o Bluetooth) aparece en el móvil como un mando físico, sin apps intermedias; sin mando conectado juegas igual con teclado y ratón. Requiere scrcpy 3.1+ (--gamepad); usa aoa si el móvil está por USB y uhid falla.", "accion": "scrcpy_game", "requiere": {"scrcpy": "3.1"}, "args": {"mode": "gamepad", "keyboard": "uhid", "mouse": "uhid"}, "campos": [
+          {"clave": "max_size", "tipo": "numero", "etiqueta": "Resolución máxima (-m, px)", "defecto": "1080"},
+          {"clave": "bitrate", "tipo": "texto", "etiqueta": "Bitrate (-b, ej. 9M)", "defecto": "9M"},
+          {"clave": "codec", "tipo": "select", "etiqueta": "Códec de vídeo", "defecto": "h264", "opciones": [{"valor": "h264", "etiqueta": "h264 (el más compatible)"}, {"valor": "h265", "etiqueta": "h265 (más calidad por bit)"}, {"valor": "av1", "etiqueta": "av1 (solo móviles nuevos)"}]},
+          {"clave": "encoder", "tipo": "texto", "etiqueta": "Codificador (--video-encoder)", "defecto": "", "opcional": true},
+          {"clave": "max_fps", "tipo": "numero", "etiqueta": "FPS máximos (--max-fps)", "defecto": "", "opcional": true},
+          {"clave": "gamepad", "tipo": "select", "etiqueta": "Mando (--gamepad)", "defecto": "uhid", "opciones": [{"valor": "uhid", "etiqueta": "uhid (recomendado)"}, {"valor": "aoa", "etiqueta": "aoa (solo USB)"}]},
+          {"clave": "ventana", "tipo": "select", "etiqueta": "Ventana", "defecto": "", "opcional": true, "opciones": [{"valor": "", "etiqueta": "En ventana (Alt+F cambia a pantalla completa)"}, {"valor": "fullscreen", "etiqueta": "Pantalla completa (-f)"}, {"valor": "borderless", "etiqueta": "Ventana sin bordes"}]},
+          {"clave": "sonido", "tipo": "select", "etiqueta": "Sonido (Android 11+)", "defecto": "", "opcional": true, "opciones": [{"valor": "", "etiqueta": "En el PC (el móvil se calla)"}, {"valor": "pc_movil", "etiqueta": "En el PC y en el móvil (Android 13+)"}, {"valor": "movil", "etiqueta": "Solo en el móvil (sin audio en el PC)"}]}]},
+        {"id": "game_virtual", "titulo": "Juego en pantalla virtual", "desc": "scrcpy --new-display=1920x1080 --start-app=<paquete> --keyboard=uhid --mouse=uhid: el juego corre en una pantalla virtual con resolución de PC y el móvil queda libre para otras cosas. Deja la resolución vacía para copiar la de la pantalla real (--new-display a secas). Requiere scrcpy 3.0+ y Android 14+.", "accion": "scrcpy_game", "requiere": {"scrcpy": "3.0", "sdk": 34}, "args": {"mode": "virtual", "keyboard": "uhid", "mouse": "uhid"}, "campos": [
+          {"clave": "new_display", "tipo": "texto", "etiqueta": "Pantalla virtual (1920x1080 o 1920x1080/420)", "defecto": "1920x1080", "opcional": true},
+          {"clave": "package", "tipo": "paquete", "etiqueta": "App a lanzar (--start-app)", "defecto": "", "opcional": true},
+          {"clave": "bitrate", "tipo": "texto", "etiqueta": "Bitrate (-b, ej. 9M)", "defecto": "9M"},
+          {"clave": "codec", "tipo": "select", "etiqueta": "Códec de vídeo", "defecto": "h264", "opciones": [{"valor": "h264", "etiqueta": "h264 (el más compatible)"}, {"valor": "h265", "etiqueta": "h265 (más calidad por bit)"}, {"valor": "av1", "etiqueta": "av1 (solo móviles nuevos)"}]},
+          {"clave": "encoder", "tipo": "texto", "etiqueta": "Codificador (--video-encoder)", "defecto": "", "opcional": true},
+          {"clave": "max_fps", "tipo": "numero", "etiqueta": "FPS máximos (--max-fps)", "defecto": "", "opcional": true},
+          {"clave": "gamepad", "tipo": "select", "etiqueta": "Mando (--gamepad, scrcpy 3.1+)", "defecto": "", "opcional": true, "opciones": [{"valor": "", "etiqueta": "Sin mando"}, {"valor": "uhid", "etiqueta": "uhid"}, {"valor": "aoa", "etiqueta": "aoa (solo USB)"}]},
+          {"clave": "ventana", "tipo": "select", "etiqueta": "Ventana", "defecto": "", "opcional": true, "opciones": [{"valor": "", "etiqueta": "En ventana (Alt+F cambia a pantalla completa)"}, {"valor": "fullscreen", "etiqueta": "Pantalla completa (-f)"}, {"valor": "borderless", "etiqueta": "Ventana sin bordes"}]},
+          {"clave": "sonido", "tipo": "select", "etiqueta": "Sonido (Android 11+)", "defecto": "", "opcional": true, "opciones": [{"valor": "", "etiqueta": "En el PC (el móvil se calla)"}, {"valor": "pc_movil", "etiqueta": "En el PC y en el móvil (Android 13+)"}, {"valor": "movil", "etiqueta": "Solo en el móvil (sin audio en el PC)"}]}]},
+        {"id": "game_otg", "titulo": "Modo OTG (solo controles)", "desc": "scrcpy --otg --keyboard=aoa --mouse=aoa --gamepad=aoa: el PC hace de teclado, ratón y mando del móvil por el cable USB, sin vídeo y sin Opciones de desarrollador, así que sirve para juegos que las bloquean como Fortnite (el juego se ve en el móvil o por HDMI). Solo USB; LAlt/LSuper liberan el ratón. --gamepad=aoa exige scrcpy 3.1+: con una anterior elige «Sin mando».", "accion": "scrcpy_game", "args": {"mode": "otg", "keyboard": "aoa", "mouse": "aoa"}, "campos": [
+          {"clave": "gamepad", "tipo": "select", "etiqueta": "Mando (--gamepad, scrcpy 3.1+)", "defecto": "aoa", "opcional": true, "opciones": [{"valor": "aoa", "etiqueta": "aoa (mando por USB)"}, {"valor": "", "etiqueta": "Sin mando"}]}]},
+        {"id": "game_lowlat", "titulo": "Latencia mínima (juegos de reflejos)", "desc": "scrcpy -m 720 -b 4M --video-codec=h264 --max-fps=60 --video-buffer=0 --no-audio --keyboard=uhid --mouse=uhid: menos píxeles, menos bits y cero búfer para que el disparo salga cuando aprietas. --video-buffer necesita scrcpy 3.0+ (antes se llamaba --display-buffer).", "accion": "scrcpy_game", "requiere": {"scrcpy": "3.0"}, "args": {"mode": "lowlat", "keyboard": "uhid", "mouse": "uhid", "no_audio": true}, "campos": [
+          {"clave": "max_size", "tipo": "numero", "etiqueta": "Resolución máxima (-m, px)", "defecto": "720"},
+          {"clave": "bitrate", "tipo": "texto", "etiqueta": "Bitrate (-b, ej. 4M)", "defecto": "4M"},
+          {"clave": "codec", "tipo": "select", "etiqueta": "Códec de vídeo", "defecto": "h264", "opciones": [{"valor": "h264", "etiqueta": "h264 (el más compatible)"}, {"valor": "h265", "etiqueta": "h265 (más calidad por bit)"}, {"valor": "av1", "etiqueta": "av1 (solo móviles nuevos)"}]},
+          {"clave": "encoder", "tipo": "texto", "etiqueta": "Codificador (--video-encoder)", "defecto": "", "opcional": true},
+          {"clave": "max_fps", "tipo": "numero", "etiqueta": "FPS máximos (--max-fps)", "defecto": "60"},
+          {"clave": "video_buffer", "tipo": "numero", "etiqueta": "Búfer de vídeo (--video-buffer, ms)", "defecto": "0"},
+          {"clave": "ventana", "tipo": "select", "etiqueta": "Ventana", "defecto": "", "opcional": true, "opciones": [{"valor": "", "etiqueta": "En ventana (Alt+F cambia a pantalla completa)"}, {"valor": "fullscreen", "etiqueta": "Pantalla completa (-f)"}, {"valor": "borderless", "etiqueta": "Ventana sin bordes"}]}]},
+        {"id": "game_vol_down", "titulo": "Bajar volumen en el PC", "desc": "Baja un 10 % el sonido del móvil que oyes en el PC (pactl sobre el flujo de scrcpy, en PipeWire o PulseAudio). El volumen del móvil no se toca. En plena partida, LAlt suelta el ratón para poder pulsar aquí.", "accion": "pc_volume", "args": {"op": "bajar"}},
+        {"id": "game_vol_up", "titulo": "Subir volumen en el PC", "desc": "Sube un 10 % el sonido del móvil en el PC, hasta un máximo de 150 %. Si estaba silenciado, le quita el silencio.", "accion": "pc_volume", "args": {"op": "subir"}},
+        {"id": "game_vol_set", "titulo": "Volumen exacto en el PC", "desc": "Fija el volumen del sonido del móvil en el PC: 0 es silencio, 100 el normal y 150 el máximo.", "accion": "pc_volume", "args": {"op": "fijar"}, "campos": [{"clave": "nivel", "tipo": "numero", "etiqueta": "Volumen (0-150 %)", "defecto": "50"}]},
+        {"id": "game_encoders", "titulo": "Listar codificadores", "desc": "scrcpy --list-encoders: muestra aquí mismo los codificadores de vídeo y audio de TU móvil. Copia el nombre exacto (por ejemplo c2.android.avc.encoder) al campo Codificador de los botones de arriba: ese nombre cambia de un móvil a otro.", "accion": "scrcpy_list", "args": {"what": "encoders"}},
+        {"id": "game_apps", "titulo": "Listar apps del móvil", "desc": "scrcpy --list-apps: muestra el nombre de paquete de cada app instalada, que es justo lo que pide --start-app en el juego en pantalla virtual. Necesita una versión de scrcpy con --start-app (3.0+).", "accion": "scrcpy_list", "requiere": {"scrcpy": "3.0"}, "args": {"what": "apps"}},
+        {"id": "game_kbd_layout", "titulo": "Configurar teclado físico", "desc": "am start -a android.settings.HARD_KEYBOARD_SETTINGS: abre en el móvil Ajustes → Sistema → Idiomas e introducción → Teclado físico. Hay que elegir ahí la distribución UNA vez: sin eso, --keyboard=uhid manda las teclas cambiadas (WASD incluido).", "accion": "am_start", "args": {"intent": "android.settings.HARD_KEYBOARD_SETTINGS"}}
       ]
     },
     {
@@ -305,63 +374,6 @@
         {"id": "db_batterystats", "titulo": "Consumo por app (batterystats)", "desc": "adb shell dumpsys batterystats (quién gasta batería desde la última carga completa)", "accion": "dumpsys", "args": {"servicio": "batterystats"}, "advertencia": "La salida son miles de líneas y tarda unos segundos: llena el panel entero. Si solo quieres guardarla, usa «Generar bugreport»."},
         {"id": "db_uptime", "titulo": "Tiempo encendido y carga", "desc": "adb shell uptime (tiempo desde el último arranque y carga media de 1, 5 y 15 min)", "accion": "custom", "args": {"command": "shell uptime"}},
         {"id": "db_services", "titulo": "Servicios del sistema", "desc": "adb shell service list (todos los servicios vivos y su interfaz; es la lista de los dumpsys que existen en TU móvil)", "accion": "custom", "args": {"command": "shell service list"}}
-      ]
-    },
-    {
-      "id": "scrcpy",
-      "titulo": "Scrcpy & Espejo",
-      "icono": "📺",
-      "desc": "Transmite la pantalla del celular a tu PC Linux (scrcpy 2.x/4.x).",
-      "comandos": [
-        {"id": "sc_standard", "titulo": "Espejo estándar", "desc": "scrcpy (latencia mínima)", "accion": "scrcpy", "args": {"mode": "standard"}},
-        {"id": "sc_screenoff", "titulo": "Pantalla apagada", "desc": "scrcpy --turn-screen-off", "accion": "scrcpy", "args": {"mode": "screenoff"}},
-        {"id": "sc_fps120", "titulo": "Ultra 120 FPS", "desc": "scrcpy --max-fps=120 --video-bit-rate=16M", "accion": "scrcpy", "args": {"mode": "fps120"}},
-        {"id": "sc_record", "titulo": "Grabar MP4", "desc": "scrcpy --record=~/Vídeos/scrcpy_<fecha>.mp4", "accion": "scrcpy", "args": {"mode": "record"}},
-        {"id": "sc_audio", "titulo": "Audio AAC", "desc": "scrcpy --audio-codec=aac (Android 11+)", "accion": "scrcpy", "args": {"mode": "audio"}},
-        {"id": "sc_otg", "titulo": "Modo OTG", "desc": "scrcpy --otg (teclado/mouse físico)", "accion": "scrcpy", "args": {"mode": "otg"}}
-      ]
-    },
-    {
-      "id": "gaming",
-      "titulo": "Gaming (jugar en la PC)",
-      "icono": "🎮",
-      "desc": "Convierte el móvil en una consola: la pantalla se ve en el PC y se juega con teclado, ratón o mando reales (scrcpy 2.7+; los botones que piden 3.x lo avisan).",
-      "comandos": [
-        {"id": "game_kbm", "titulo": "Modo Gaming (teclado y ratón)", "desc": "scrcpy -m 1080 -b 9M --video-codec=h264 --keyboard=uhid --mouse=uhid (añade --video-encoder=... solo si rellenas el codificador). Con uhid el ratón queda CAPTURADO, como en un juego de PC: LAlt, LSuper o RSuper lo devuelven al escritorio. Antes de la primera partida pasa por «Configurar teclado físico» o las teclas saldrán cambiadas. Requiere scrcpy 2.7+.", "accion": "scrcpy_game", "args": {"mode": "kbm", "keyboard": "uhid", "mouse": "uhid"}, "campos": [
-          {"clave": "max_size", "tipo": "numero", "etiqueta": "Resolución máxima (-m, px)", "defecto": "1080"},
-          {"clave": "bitrate", "tipo": "texto", "etiqueta": "Bitrate (-b, ej. 9M)", "defecto": "9M"},
-          {"clave": "codec", "tipo": "select", "etiqueta": "Códec de vídeo", "defecto": "h264", "opciones": [{"valor": "h264", "etiqueta": "h264 (el más compatible)"}, {"valor": "h265", "etiqueta": "h265 (más calidad por bit)"}, {"valor": "av1", "etiqueta": "av1 (solo móviles nuevos)"}]},
-          {"clave": "encoder", "tipo": "texto", "etiqueta": "Codificador (--video-encoder)", "defecto": "", "opcional": true},
-          {"clave": "max_fps", "tipo": "numero", "etiqueta": "FPS máximos (--max-fps)", "defecto": "", "opcional": true},
-          {"clave": "fullscreen", "tipo": "select", "etiqueta": "Pantalla completa (-f)", "defecto": "", "opcional": true, "opciones": [{"valor": "", "etiqueta": "No"}, {"valor": "1", "etiqueta": "Sí"}]},
-          {"clave": "screen_off", "tipo": "select", "etiqueta": "Apagar la pantalla del móvil (-S, ahorra batería)", "defecto": "", "opcional": true, "opciones": [{"valor": "", "etiqueta": "No"}, {"valor": "1", "etiqueta": "Sí"}]}]},
-        {"id": "game_pad", "titulo": "Gaming con mando", "desc": "scrcpy -m 1080 -b 9M --video-codec=h264 --keyboard=uhid --mouse=uhid --gamepad=uhid: el mando que tienes en el PC (USB o Bluetooth) aparece en el móvil como un mando físico, sin apps intermedias. Requiere scrcpy 3.1+ (--gamepad); usa aoa si el móvil está por USB y uhid falla.", "accion": "scrcpy_game", "requiere": {"scrcpy": "3.1"}, "args": {"mode": "gamepad", "keyboard": "uhid", "mouse": "uhid"}, "campos": [
-          {"clave": "max_size", "tipo": "numero", "etiqueta": "Resolución máxima (-m, px)", "defecto": "1080"},
-          {"clave": "bitrate", "tipo": "texto", "etiqueta": "Bitrate (-b, ej. 9M)", "defecto": "9M"},
-          {"clave": "codec", "tipo": "select", "etiqueta": "Códec de vídeo", "defecto": "h264", "opciones": [{"valor": "h264", "etiqueta": "h264 (el más compatible)"}, {"valor": "h265", "etiqueta": "h265 (más calidad por bit)"}, {"valor": "av1", "etiqueta": "av1 (solo móviles nuevos)"}]},
-          {"clave": "encoder", "tipo": "texto", "etiqueta": "Codificador (--video-encoder)", "defecto": "", "opcional": true},
-          {"clave": "max_fps", "tipo": "numero", "etiqueta": "FPS máximos (--max-fps)", "defecto": "", "opcional": true},
-          {"clave": "gamepad", "tipo": "select", "etiqueta": "Mando (--gamepad)", "defecto": "uhid", "opciones": [{"valor": "uhid", "etiqueta": "uhid (recomendado)"}, {"valor": "aoa", "etiqueta": "aoa (solo USB)"}]}]},
-        {"id": "game_virtual", "titulo": "Juego en pantalla virtual", "desc": "scrcpy --new-display=1920x1080 --start-app=<paquete> --keyboard=uhid --mouse=uhid: el juego corre en una pantalla virtual con resolución de PC y el móvil queda libre para otras cosas. Deja la resolución vacía para copiar la de la pantalla real (--new-display a secas). Requiere scrcpy 3.0+ y Android 14+.", "accion": "scrcpy_game", "requiere": {"scrcpy": "3.0", "sdk": 34}, "args": {"mode": "virtual", "keyboard": "uhid", "mouse": "uhid"}, "campos": [
-          {"clave": "new_display", "tipo": "texto", "etiqueta": "Pantalla virtual (1920x1080 o 1920x1080/420)", "defecto": "1920x1080", "opcional": true},
-          {"clave": "package", "tipo": "paquete", "etiqueta": "App a lanzar (--start-app)", "defecto": "", "opcional": true},
-          {"clave": "bitrate", "tipo": "texto", "etiqueta": "Bitrate (-b, ej. 9M)", "defecto": "9M"},
-          {"clave": "codec", "tipo": "select", "etiqueta": "Códec de vídeo", "defecto": "h264", "opciones": [{"valor": "h264", "etiqueta": "h264 (el más compatible)"}, {"valor": "h265", "etiqueta": "h265 (más calidad por bit)"}, {"valor": "av1", "etiqueta": "av1 (solo móviles nuevos)"}]},
-          {"clave": "encoder", "tipo": "texto", "etiqueta": "Codificador (--video-encoder)", "defecto": "", "opcional": true},
-          {"clave": "max_fps", "tipo": "numero", "etiqueta": "FPS máximos (--max-fps)", "defecto": "", "opcional": true},
-          {"clave": "gamepad", "tipo": "select", "etiqueta": "Mando (--gamepad, scrcpy 3.1+)", "defecto": "", "opcional": true, "opciones": [{"valor": "", "etiqueta": "Sin mando"}, {"valor": "uhid", "etiqueta": "uhid"}, {"valor": "aoa", "etiqueta": "aoa (solo USB)"}]}]},
-        {"id": "game_otg", "titulo": "Modo OTG (solo controles)", "desc": "scrcpy --otg --keyboard=aoa --mouse=aoa --gamepad=aoa: el PC hace de teclado, ratón y mando del móvil por el cable USB, sin vídeo y sin depuración ADB. Es lo que quieres cuando el móvil ya está en una TV o en un dock. Solo funciona por USB; LAlt/LSuper liberan el ratón. El --gamepad=aoa que lanza por defecto exige scrcpy 3.1+: con una versión anterior deja el mando en «Sin mando» o scrcpy no arrancará.", "accion": "scrcpy_game", "args": {"mode": "otg", "keyboard": "aoa", "mouse": "aoa"}, "campos": [
-          {"clave": "gamepad", "tipo": "select", "etiqueta": "Mando (--gamepad, scrcpy 3.1+)", "defecto": "aoa", "opcional": true, "opciones": [{"valor": "aoa", "etiqueta": "aoa (mando por USB)"}, {"valor": "", "etiqueta": "Sin mando"}]}]},
-        {"id": "game_lowlat", "titulo": "Latencia mínima (juegos de reflejos)", "desc": "scrcpy -m 720 -b 4M --video-codec=h264 --max-fps=60 --video-buffer=0 --no-audio --keyboard=uhid --mouse=uhid: menos píxeles, menos bits y cero búfer para que el disparo salga cuando aprietas. --video-buffer necesita scrcpy 3.0+ (antes se llamaba --display-buffer).", "accion": "scrcpy_game", "requiere": {"scrcpy": "3.0"}, "args": {"mode": "lowlat", "keyboard": "uhid", "mouse": "uhid", "no_audio": true}, "campos": [
-          {"clave": "max_size", "tipo": "numero", "etiqueta": "Resolución máxima (-m, px)", "defecto": "720"},
-          {"clave": "bitrate", "tipo": "texto", "etiqueta": "Bitrate (-b, ej. 4M)", "defecto": "4M"},
-          {"clave": "codec", "tipo": "select", "etiqueta": "Códec de vídeo", "defecto": "h264", "opciones": [{"valor": "h264", "etiqueta": "h264 (el más compatible)"}, {"valor": "h265", "etiqueta": "h265 (más calidad por bit)"}, {"valor": "av1", "etiqueta": "av1 (solo móviles nuevos)"}]},
-          {"clave": "encoder", "tipo": "texto", "etiqueta": "Codificador (--video-encoder)", "defecto": "", "opcional": true},
-          {"clave": "max_fps", "tipo": "numero", "etiqueta": "FPS máximos (--max-fps)", "defecto": "60"},
-          {"clave": "video_buffer", "tipo": "numero", "etiqueta": "Búfer de vídeo (--video-buffer, ms)", "defecto": "0"}]},
-        {"id": "game_encoders", "titulo": "Listar codificadores", "desc": "scrcpy --list-encoders: muestra aquí mismo los codificadores de vídeo y audio de TU móvil. Copia el nombre exacto (por ejemplo c2.android.avc.encoder) al campo Codificador de los botones de arriba: ese nombre cambia de un móvil a otro.", "accion": "scrcpy_list", "args": {"what": "encoders"}},
-        {"id": "game_apps", "titulo": "Listar apps del móvil", "desc": "scrcpy --list-apps: muestra el nombre de paquete de cada app instalada, que es justo lo que pide --start-app en el juego en pantalla virtual. Necesita una versión de scrcpy con --start-app (3.0+).", "accion": "scrcpy_list", "requiere": {"scrcpy": "3.0"}, "args": {"what": "apps"}},
-        {"id": "game_kbd_layout", "titulo": "Configurar teclado físico", "desc": "am start -a android.settings.HARD_KEYBOARD_SETTINGS: abre en el móvil Ajustes → Sistema → Idiomas e introducción → Teclado físico. Hay que elegir ahí la distribución UNA vez: sin eso, --keyboard=uhid manda las teclas cambiadas (WASD incluido).", "accion": "am_start", "args": {"intent": "android.settings.HARD_KEYBOARD_SETTINGS"}}
       ]
     },
     {

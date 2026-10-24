@@ -34,6 +34,8 @@ FIXTURES = PROJECT_DIR / 'tests' / 'fixtures'
 ENV = {k: os.environ[k] for k in ('HOME', 'XDG_CONFIG_HOME', 'XDG_STATE_HOME', 'XDG_CACHE_HOME')}
 ARGV_LOG = Path(TMP) / 'argv.log'
 SCRCPY_LOG = Path(TMP) / 'scrcpy_argv.log'
+PACTL_LOG = Path(TMP) / 'pactl_argv.log'
+PACTL_JSON = Path(TMP) / 'pactl_sink_inputs.json'
 SCENARIO = Path(TMP) / 'scenario'
 SCENARIO.write_text('default')
 
@@ -51,6 +53,7 @@ case "${args[0]}" in
             two) echo "SERIAL1               device usb:1-1 product:e3q model:SM_S928B"; echo "SERIAL2               device usb:1-2 product:x model:Y";;
             unauth) echo "SERIAL1               device usb:1-1 product:e3q model:SM_S928B"; echo "192.168.1.9:5555       unauthorized";;
             noperm) echo "SERIAL1               no permissions (user in plugdev group; are your udev rules wrong?); see [http://developer.android.com/tools/device.html]";;
+            wifi) echo "192.168.1.42:5555      device product:e3q model:SM_S928B transport_id:2";;
             *) echo "SERIAL1               device usb:1-1 product:e3q model:SM_S928B transport_id:1";;
         esac
         exit 0;;
@@ -158,7 +161,9 @@ case "${args[0]}" in
             ps) echo "USER PID PPID NAME"; echo "root 1 0 /init"; exit 0;;
             logcat) echo " 1234 1 I Example: hello"; echo " 1234 1 E Crash: boom"; exit 0;;
             top) printf 'Tasks: 3 total\r\n  PID USER\r\n'; exit 0;;
-            ip) echo "    inet 192.168.1.42/24 brd 192.168.1.255 scope global wlan0"; exit 0;;
+            ip)
+                if [[ "$scen" == "no_ip" ]]; then exit 0; fi
+                echo "    inet 192.168.1.42/24 brd 192.168.1.255 scope global wlan0"; exit 0;;
             *) exit 0;;
         esac;;
     *) exit 0;;
@@ -202,6 +207,22 @@ exit 0
 '''
 
 
+FAKE_PACTL_SCRIPT = r'''#!/bin/bash
+# pactl falso: registra el argv y, al listar, devuelve el JSON que haya dejado
+# el test en $GEKKO_TEST_PACTL_JSON (los flujos de audio del escritorio).
+printf '%s\n' "$(printf '%s\x1f' "$@")" >> "$GEKKO_TEST_PACTL_LOG"
+scen="$(cat "$GEKKO_TEST_SCENARIO" 2>/dev/null || echo default)"
+if [[ "$1" == "-f" && "$3" == "list" ]]; then
+    case "$scen" in
+        pactl_fail) echo "Connection failure: Connection refused" >&2; exit 1;;
+        pactl_nojson) echo "Sink Input #57"; exit 0;;
+    esac
+    cat "$GEKKO_TEST_PACTL_JSON"; exit 0
+fi
+exit 0
+'''
+
+
 def _write_fake(path, script=FAKE_ADB_SCRIPT):
     Path(path).write_text(script, encoding='utf-8')
     os.chmod(path, 0o755)
@@ -216,6 +237,10 @@ os.environ['GEKKO_TEST_SCRCPY_LOG'] = str(SCRCPY_LOG)
 os.environ['GEKKO_TEST_SCENARIO'] = str(SCENARIO)
 os.environ['GEKKO_TEST_FIXTURES'] = str(FIXTURES)
 os.environ['GEKKO_SCRCPY_EXECUTABLE'] = FAKE_SCRCPY
+FAKE_PACTL = _write_fake(os.path.join(TMP, 'fake-pactl'), FAKE_PACTL_SCRIPT)
+os.environ['GEKKO_PACTL_EXECUTABLE'] = FAKE_PACTL
+os.environ['GEKKO_TEST_PACTL_LOG'] = str(PACTL_LOG)
+os.environ['GEKKO_TEST_PACTL_JSON'] = str(PACTL_JSON)
 os.environ['GEKKO_ADB_BASE'] = str(PROJECT_DIR)
 
 import gekko_adb_core as core  # noqa: E402
@@ -583,7 +608,14 @@ class TestGaming(Base):
         self.assertEqual(len(cats), 1, 'falta la categoría gaming')
         self.assertEqual([c['id'] for c in cats[0]['comandos']],
                          ['game_kbm', 'game_pad', 'game_virtual', 'game_otg',
-                          'game_lowlat', 'game_encoders', 'game_apps', 'game_kbd_layout'])
+                          'game_lowlat', 'game_vol_down', 'game_vol_up', 'game_vol_set',
+                          'game_encoders', 'game_apps', 'game_kbd_layout'])
+
+    def test_compartir_pantalla_y_gaming_justo_tras_la_conexion(self):
+        """Se veían poco al fondo de la barra lateral: van tras «Conexión Inalámbrica»."""
+        ids = [k['id'] for k in CAT['categorias']]
+        self.assertEqual(ids[ids.index('conexion'):ids.index('conexion') + 3],
+                         ['conexion', 'scrcpy', 'gaming'])
 
     # ---- el botón estrella -------------------------------------------
     def test_game_kbm_defectos_reproduce_el_comando_del_usuario(self):
@@ -613,12 +645,58 @@ class TestGaming(Base):
         self.assertNotIn('--max-fps', ' '.join(sc[0]))
 
     def test_game_kbm_fps_pantalla_completa_y_apagar_pantalla(self):
-        v = dict(self.defectos('game_kbm'), max_fps='60', fullscreen='1', screen_off='1')
+        v = dict(self.defectos('game_kbm'), max_fps='60', ventana='fullscreen', screen_off='1')
         res, sc = self.run_scrcpy_spec('game_kbm', v)
         self.assertTrue(res['success'], res['stderr'])
         self.assertEqual(sc, [['-m', '1080', '-b', '9M', '--video-codec=h264', '--max-fps=60',
                                '--fullscreen', '--turn-screen-off',
                                '--keyboard=uhid', '--mouse=uhid']])
+
+    # ---- ventana y sonido ----------------------------------------------
+    def test_ventana_sin_bordes(self):
+        v = dict(self.defectos('game_kbm'), ventana='borderless')
+        res, sc = self.run_scrcpy_spec('game_kbm', v)
+        self.assertTrue(res['success'], res['stderr'])
+        self.assertEqual(sc, [self.KBM[:5] + ['--window-borderless'] + self.KBM[5:]])
+
+    def test_sonido_en_el_pc_y_en_el_movil(self):
+        """'output' calla el móvil: para oírlo en los dos hay que capturar 'playback' y duplicar."""
+        v = dict(self.defectos('game_kbm'), sonido='pc_movil')
+        res, sc = self.run_scrcpy_spec('game_kbm', v)
+        self.assertTrue(res['success'], res['stderr'])
+        self.assertEqual(sc, [self.KBM[:5] + ['--audio-source=playback', '--audio-dup'] +
+                              self.KBM[5:]])
+
+    def test_sonido_solo_en_el_movil_no_manda_audio(self):
+        v = dict(self.defectos('game_pad'), sonido='movil', ventana='fullscreen')
+        res, sc = self.run_scrcpy_spec('game_pad', v)
+        self.assertTrue(res['success'], res['stderr'])
+        self.assertEqual(sc, [self.KBM[:5] + ['--fullscreen', '--no-audio'] + self.KBM[5:] +
+                              ['--gamepad=uhid']])
+
+    def test_defectos_de_ventana_y_sonido_no_generan_bandera(self):
+        """Por defecto: en ventana y el sonido en el PC, que es lo que hace scrcpy solo."""
+        for cid in ('game_kbm', 'game_pad', 'game_virtual', 'game_lowlat'):
+            reset_scrcpy_calls()
+            res, sc = self.run_scrcpy_spec(cid, self.defectos(cid))
+            self.assertTrue(res['success'], res['stderr'])
+            for bandera in ('--fullscreen', '--window-borderless', '--audio-source', '--audio-dup'):
+                self.assertNotIn(bandera, ' '.join(sc[0]), f'{cid}: {bandera}')
+
+    def test_latencia_minima_a_pantalla_completa(self):
+        v = dict(self.defectos('game_lowlat'), ventana='fullscreen')
+        res, sc = self.run_scrcpy_spec('game_lowlat', v)
+        self.assertTrue(res['success'], res['stderr'])
+        self.assertEqual(sc, [['-m', '720', '-b', '4M', '--video-codec=h264', '--max-fps=60',
+                               '--video-buffer=0', '--no-audio', '--fullscreen',
+                               '--keyboard=uhid', '--mouse=uhid']])
+
+    def test_ventana_y_sonido_fuera_de_lista(self):
+        v = dict(self.defectos('game_kbm'), ventana='gigante')
+        self._rechaza('game_kbm', v, 'Modo de ventana no válido')
+        reset_scrcpy_calls()
+        v = dict(self.defectos('game_kbm'), sonido='altavoz')
+        self._rechaza('game_kbm', v, 'Sonido no válido')
 
     def test_game_kbm_dos_dispositivos_antepone_serial(self):
         scenario('two')
@@ -841,6 +919,204 @@ class TestGaming(Base):
         self.assertEqual(cs, [['shell', 'am', 'start', '-a',
                                'android.settings.HARD_KEYBOARD_SETTINGS']])
         self.assertEqual(scrcpy_calls(), [])
+
+
+class TestCompartirPantalla(Base):
+    """«Ver el móvil en el PC»: ventana o pantalla completa y dónde suena."""
+
+    def test_por_defecto_es_scrcpy_a_secas(self):
+        scenario('two')
+        res, sc = self.run_scrcpy_spec('sc_standard', self.defectos('sc_standard'))
+        self.assertTrue(res['success'], res['stderr'])
+        self.assertEqual(sc, [['-s', 'SERIAL1']])
+
+    def test_pantalla_completa_con_sonido_en_los_dos(self):
+        v = dict(self.defectos('sc_standard'), ventana='fullscreen', sonido='pc_movil')
+        res, sc = self.run_scrcpy_spec('sc_standard', v)
+        self.assertTrue(res['success'], res['stderr'])
+        self.assertEqual(sc, [['--fullscreen', '--audio-source=playback', '--audio-dup']])
+
+    def test_los_demas_modos_siguen_siendo_de_un_clic(self):
+        self.assertFalse(SPECS['sc_screenoff'].get('campos'))
+        res, sc = self.run_scrcpy_spec('sc_screenoff')
+        self.assertTrue(res['success'], res['stderr'])
+        self.assertEqual(sc, [['--turn-screen-off']])
+
+
+class TestWifi(Base):
+    """«Pasar a Wi-Fi»: IP, tcpip y connect en un clic, con el cable puesto."""
+
+    def setUp(self):
+        super().setUp()
+        pausa = mock.patch.object(core, '_WIFI_PAUSA', 0)
+        pausa.start()
+        self.addCleanup(pausa.stop)
+
+    def test_un_clic_hace_los_tres_pasos(self):
+        res, cs = self.run_spec('wifi_auto')
+        self.assertTrue(res['success'], res['stderr'])
+        self.assertEqual(cs, [['-s', 'SERIAL1', 'shell', 'ip', '-f', 'inet', 'addr', 'show', 'wlan0'],
+                              ['-s', 'SERIAL1', 'tcpip', '5555'],
+                              ['connect', '192.168.1.42:5555']])
+        self.assertIn('Ya puedes quitar el cable', res['stdout'])
+
+    def test_sin_movil_no_hace_nada(self):
+        scenario('none')
+        res, cs = self.run_spec('wifi_auto')
+        self.assertFalse(res['success'])
+        self.assertIn('No hay ningún móvil listo', res['stderr'])
+        self.assertEqual(cs, [])
+
+    def test_ya_conectado_por_wifi(self):
+        scenario('wifi')
+        res, cs = self.run_spec('wifi_auto')
+        self.assertTrue(res['success'], res['stderr'])
+        self.assertIn('Ya estás conectado por Wi-Fi', res['stdout'])
+        self.assertEqual(cs, [])
+
+    def test_sin_ip_no_abre_el_puerto(self):
+        scenario('no_ip')
+        res, cs = self.run_spec('wifi_auto')
+        self.assertFalse(res['success'])
+        self.assertIn('no tiene IP en la Wi-Fi', res['stderr'])
+        self.assertEqual([c for c in cs if 'tcpip' in c], [])
+
+    def test_reintenta_el_connect_y_explica_el_fallo(self):
+        scenario('connect_fail')
+        res, cs = self.run_spec('wifi_auto')
+        self.assertFalse(res['success'])
+        self.assertIn('no responde en 192.168.1.42:5555', res['stderr'])
+        self.assertEqual(len([c for c in cs if c[:1] == ['connect']]), core._WIFI_INTENTOS)
+
+
+def _flujo(index, binario, pct, mute=False, nombre=None):
+    """Un sink-input tal como lo devuelve `pactl -f json list sink-inputs`."""
+    canal = {'value': 0, 'value_percent': f'{pct}%', 'db': '0.00 dB'}
+    return {'index': index, 'mute': mute,
+            'volume': {'front-left': dict(canal), 'front-right': dict(canal)},
+            'properties': {'application.process.binary': binario,
+                           'application.name': binario if nombre is None else nombre}}
+
+
+class TestVolumenPC(Base):
+    """El volumen del móvil en el PC se cambia con pactl, solo en el flujo de scrcpy."""
+
+    LISTAR = ['-f', 'json', 'list', 'sink-inputs']
+    FIREFOX = _flujo(12, 'firefox', 100)
+
+    def setUp(self):
+        super().setUp()
+        if PACTL_LOG.exists():
+            PACTL_LOG.unlink()
+        self.flujos([self.FIREFOX, _flujo(57, 'scrcpy', 80)])
+
+    def flujos(self, lista):
+        PACTL_JSON.write_text(json.dumps(lista), encoding='utf-8')
+
+    def pactl(self):
+        if not PACTL_LOG.exists():
+            return []
+        return [line.split('\x1f')[:-1]
+                for line in PACTL_LOG.read_text(encoding='utf-8').splitlines()]
+
+    def test_bajar_toca_solo_el_flujo_de_scrcpy(self):
+        res, cs = self.run_spec('game_vol_down')
+        self.assertTrue(res['success'], res['stderr'])
+        self.assertEqual(self.pactl(), [self.LISTAR, ['set-sink-input-volume', '57', '70%']])
+        self.assertIn('70 %', res['stdout'])
+        self.assertEqual(cs, [], 'el volumen del PC no pasa por adb')
+
+    def test_subir(self):
+        res, _ = self.run_spec('game_vol_up')
+        self.assertTrue(res['success'], res['stderr'])
+        self.assertEqual(self.pactl()[-1], ['set-sink-input-volume', '57', '90%'])
+
+    def test_subir_se_queda_en_150(self):
+        self.flujos([_flujo(57, 'scrcpy', 145)])
+        self.run_spec('game_vol_up')
+        self.assertEqual(self.pactl()[-1], ['set-sink-input-volume', '57', '150%'])
+
+    def test_bajar_hasta_el_silencio(self):
+        self.flujos([_flujo(57, 'scrcpy', 5)])
+        res, _ = self.run_spec('game_vol_down')
+        self.assertTrue(res['success'], res['stderr'])
+        self.assertEqual(self.pactl()[-1], ['set-sink-input-volume', '57', '0%'])
+        self.assertIn('silencio', res['stdout'])
+
+    def test_subir_quita_el_silencio(self):
+        self.flujos([_flujo(57, 'scrcpy', 0, mute=True)])
+        self.run_spec('game_vol_up')
+        self.assertEqual(self.pactl()[1:], [['set-sink-input-volume', '57', '10%'],
+                                            ['set-sink-input-mute', '57', '0']])
+
+    def test_fijar_volumen_exacto(self):
+        res, _ = self.run_spec('game_vol_set', {'nivel': '35'})
+        self.assertTrue(res['success'], res['stderr'])
+        self.assertEqual(self.pactl()[-1], ['set-sink-input-volume', '57', '35%'])
+
+    def test_fijar_un_valor_malo_no_toca_nada(self):
+        for malo, trozo in (('200', 'fuera de rango'), ('-5', 'fuera de rango'),
+                            ('mucho', 'debe ser un número entero'), ('', 'Falta el valor')):
+            if PACTL_LOG.exists():
+                PACTL_LOG.unlink()
+            res, _ = self.run_spec('game_vol_set', {'nivel': malo})
+            self.assertFalse(res['success'], malo)
+            self.assertIn(trozo, res['stderr'])
+            self.assertEqual(self.pactl(), [], malo)
+
+    def test_basta_el_nombre_de_la_app(self):
+        """Si pactl no da el binario, el nombre de la app (scrcpy) también vale."""
+        self.flujos([_flujo(80, '', 100, nombre='scrcpy')])
+        self.run_spec('game_vol_down')
+        self.assertEqual(self.pactl()[-1], ['set-sink-input-volume', '80', '90%'])
+
+    def test_cliente_nativo_de_pipewire_solo_con_node_name(self):
+        """Así llegan en pactl los clientes nativos de PipeWire: sin binario ni app."""
+        self.flujos([self.FIREFOX, {'index': 81, 'mute': False,
+                                    'volume': {'aux0': {'value_percent': '60%'}},
+                                    'properties': {'node.name': 'scrcpy'}}])
+        self.run_spec('game_vol_down')
+        self.assertEqual(self.pactl()[-1], ['set-sink-input-volume', '81', '50%'])
+
+    def test_otros_programas_sin_nombre_no_se_tocan(self):
+        """Un flujo sin binario ni nombre (como el 'java' anónimo) no es scrcpy."""
+        self.flujos([{'index': 90, 'mute': False, 'volume': {},
+                      'properties': {'node.name': 'java', 'media.name': 'Playback Stream'}}])
+        res, _ = self.run_spec('game_vol_down')
+        self.assertFalse(res['success'])
+        self.assertEqual(self.pactl(), [self.LISTAR])
+
+    def test_dos_ventanas_de_scrcpy(self):
+        self.flujos([_flujo(57, 'scrcpy', 80), _flujo(58, 'scrcpy', 100)])
+        res, _ = self.run_spec('game_vol_down')
+        self.assertEqual(self.pactl()[1:], [['set-sink-input-volume', '57', '70%'],
+                                            ['set-sink-input-volume', '58', '90%']])
+        self.assertIn('70 %, 90 %', res['stdout'])
+
+    def test_sin_scrcpy_sonando(self):
+        self.flujos([self.FIREFOX])
+        res, _ = self.run_spec('game_vol_down')
+        self.assertFalse(res['success'])
+        self.assertIn('No suena nada de scrcpy', res['stderr'])
+        self.assertEqual(self.pactl(), [self.LISTAR])
+
+    def test_sin_pactl(self):
+        with mock.patch.object(core, 'PACTL_EXEC', os.path.join(TMP, 'no-existe-pactl')):
+            res, _ = self.run_spec('game_vol_up')
+        self.assertFalse(res['success'])
+        self.assertIn('No se encontró pactl', res['stderr'])
+
+    def test_pactl_sin_json(self):
+        scenario('pactl_nojson')
+        res, _ = self.run_spec('game_vol_up')
+        self.assertFalse(res['success'])
+        self.assertIn('no devolvió JSON', res['stderr'])
+
+    def test_pactl_sin_servidor_de_sonido(self):
+        scenario('pactl_fail')
+        res, _ = self.run_spec('game_vol_up')
+        self.assertFalse(res['success'])
+        self.assertIn('Connection refused', res['stderr'])
 
 
 class TestRendimiento(Base):

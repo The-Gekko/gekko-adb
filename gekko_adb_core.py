@@ -24,7 +24,7 @@ from pathlib import Path
 
 APP_ID = 'com.gekko.adb'
 APP_NAME = 'Gekko ADB Studio'
-APP_VERSION = '2.1.0'
+APP_VERSION = '2.2.0'
 BASE_DIR = Path(os.environ.get('GEKKO_ADB_BASE', os.path.dirname(os.path.abspath(__file__))))
 
 CATALOGO_FILE = BASE_DIR / 'adb_commands.json'
@@ -862,16 +862,70 @@ def act_mdns_services():
     return res
 
 
-def act_device_ip():
-    res = run_adb(['shell', 'ip', '-f', 'inet', 'addr', 'show', 'wlan0'])
+def _wifi_ip(serial=None):
+    """IP del teléfono en la Wi-Fi: (ip, '') o (None, error de adb)."""
+    res = run_adb(['shell', 'ip', '-f', 'inet', 'addr', 'show', 'wlan0'], serial=serial)
     m = re.search(r'inet (\d+\.\d+\.\d+\.\d+)', res['stdout'])
-    if not m:
-        res2 = run_adb(['shell', 'ip', 'route', 'get', '1.1.1.1'])
-        m = re.search(r'src (\d+\.\d+\.\d+\.\d+)', res2['stdout'])
-        if not m:
-            return _fail('No se encontró IP Wi-Fi (¿está conectado a una red?)\n' +
-                         (res['stderr'] or res2['stderr']))
-    return _ok(f'IP Wi-Fi del teléfono: {m.group(1)}  (usa {m.group(1)}:5555 tras "Activar puerto TCP/IP")')
+    if m:
+        return m.group(1), ''
+    res2 = run_adb(['shell', 'ip', 'route', 'get', '1.1.1.1'], serial=serial)
+    m = re.search(r'src (\d+\.\d+\.\d+\.\d+)', res2['stdout'])
+    if m:
+        return m.group(1), ''
+    return None, res['stderr'] or res2['stderr']
+
+
+def act_device_ip():
+    ip, err = _wifi_ip()
+    if not ip:
+        return _fail('No se encontró IP Wi-Fi (¿está conectado a una red?)\n' + err)
+    return _ok(f'IP Wi-Fi del teléfono: {ip}  (usa {ip}:5555 tras "Activar puerto TCP/IP")')
+
+
+# «Pasar a Wi-Fi» hace en un clic lo que antes eran tres botones (IP Wi-Fi,
+# Activar puerto TCP/IP y Conectar por IP) sin copiar la IP a mano. adbd tarda
+# un instante en reiniciarse en modo TCP, así que el connect se reintenta: el
+# primero suele llegar antes de que el puerto escuche y devuelve «refused».
+_WIFI_INTENTOS = 6
+_WIFI_PAUSA = 1.0
+
+
+def _es_inalambrico(serial):
+    """'192.168.1.9:5555' (TCP/IP) o 'adb-XXXX._adb-tls-connect._tcp' (mDNS)."""
+    return ':' in serial or serial.startswith('adb-')
+
+
+def act_wifi_auto(port='5555'):
+    port = _int(port, 'puerto')
+    if not 1 <= int(port) <= 65535:
+        raise ValueError(f'Puerto fuera de rango: {port} (1-65535)')
+    listos = get_devices()
+    if not listos:
+        return _fail('No hay ningún móvil listo: conéctalo con el cable USB, acepta la '
+                     'depuración USB en el teléfono y vuelve a pulsar.')
+    usb = [s for s in listos if not _es_inalambrico(s)]
+    if not usb:
+        return _ok(f'Ya estás conectado por Wi-Fi ({", ".join(listos)}): no hace falta el cable.')
+    serial = usb[0]
+    ip, err = _wifi_ip(serial)
+    if not ip:
+        return _fail('El móvil no tiene IP en la Wi-Fi: conéctalo a la misma red que el PC '
+                     'y vuelve a pulsar.\n' + err)
+    res = run_adb(['tcpip', port], serial=serial)
+    if not res['success'] or 'restarting' not in res['stdout'].lower():
+        return _fail(res['stderr'] or res['stdout'] or f'adb tcpip {port} falló')
+    destino = f'{ip}:{port}'
+    for intento in range(_WIFI_INTENTOS):
+        if intento:
+            time.sleep(_WIFI_PAUSA)
+        res = act_connect(destino)
+        if res['success']:
+            return _ok(f'Conectado por Wi-Fi a {destino}. Ya puedes quitar el cable: el '
+                       'espejo y el gaming siguen por Wi-Fi.\nAl reiniciar el móvil se pierde '
+                       'el modo TCP/IP: vuelve a pulsar con el cable puesto.')
+    return _fail(f'El móvil abrió el puerto {port} pero no responde en {destino}: comprueba '
+                 'que el PC y el móvil están en la misma Wi-Fi y que el router no aísla a '
+                 'los clientes.\n' + res['stderr'])
 
 
 def act_get_state():
@@ -1731,7 +1785,7 @@ def act_statusbar(what):
     return res
 
 
-def act_scrcpy(mode):
+def act_scrcpy(mode, v=None):
     cmd = []
     if mode == 'screenoff':
         cmd += ['--turn-screen-off']
@@ -1748,7 +1802,7 @@ def act_scrcpy(mode):
         cmd += ['--otg']
     elif mode != 'standard':
         return _fail(f'Modo scrcpy desconocido: {mode}')
-    return run_scrcpy(cmd)
+    return run_scrcpy(cmd + _sc_salida(v or {}))
 
 
 # ----------------------------------------------------------------------
@@ -1850,6 +1904,21 @@ def _sc_start_app(valor):
     return f'--start-app={v}'
 
 
+# Ventana y sonido: las dos preguntas comunes a todo botón que abre vídeo. El
+# valor vacío es el comportamiento por defecto de scrcpy y no genera bandera.
+_SC_VENTANAS = {'': [], 'fullscreen': ['--fullscreen'], 'borderless': ['--window-borderless']}
+# 'output' (el defecto) manda el sonido al PC y calla el móvil; para que suene
+# en los dos hay que capturar 'playback' y duplicarlo, y eso pide Android 13.
+_SC_SONIDOS = {'': [], 'pc_movil': ['--audio-source=playback', '--audio-dup'],
+               'movil': ['--no-audio']}
+
+
+def _sc_salida(v):
+    ventana = _sc_choice(v.get('ventana'), 'Modo de ventana', tuple(k for k in _SC_VENTANAS if k))
+    sonido = _sc_choice(v.get('sonido'), 'Sonido', tuple(k for k in _SC_SONIDOS if k))
+    return _SC_VENTANAS[ventana] + _SC_SONIDOS[sonido]
+
+
 def scrcpy_game_args(v):
     """Construye la lista de banderas de scrcpy para los botones de Gaming.
 
@@ -1882,8 +1951,7 @@ def scrcpy_game_args(v):
             args.append(_sc_start_app(v.get('package')))
         if v.get('no_audio'):
             args.append('--no-audio')
-        if _sc_bool(v.get('fullscreen')):
-            args.append('--fullscreen')
+        args += _sc_salida(v)
         if _sc_bool(v.get('screen_off')):
             args.append('--turn-screen-off')
     teclado = _sc_choice(v.get('keyboard'), 'Teclado', _SC_HID_MODES)
@@ -1911,6 +1979,93 @@ def act_scrcpy_list(what):
     if flag is None:
         return _fail(f'Listado de scrcpy desconocido: {what}')
     return run_scrcpy_capture([flag], timeout=90)
+
+
+# ----------------------------------------------------------------------
+# Volumen del sonido del móvil EN EL PC
+#
+# scrcpy no tiene bandera de volumen: reproduce el audio como un programa más
+# del escritorio. Así que el volumen se cambia donde vive ese sonido, en
+# PipeWire/PulseAudio, con pactl: se buscan los flujos cuyo proceso es scrcpy y
+# se les fija el volumen. El volumen del móvil no se toca.
+
+PACTL_EXEC = os.environ.get('GEKKO_PACTL_EXECUTABLE') or shutil.which('pactl') or 'pactl'
+_VOL_MAX = 150
+_VOL_PASO = 10
+
+
+def _es_flujo_scrcpy(flujo):
+    # Los clientes que van por pipewire-pulse traen el binario, pero los nativos
+    # de PipeWire (scrcpy 5 sale por SDL3) pueden llegar solo con application.name
+    # o node.name: scrcpy fija su nombre con la pista SDL_APP_NAME.
+    props = flujo.get('properties') or {}
+    if os.path.basename(str(props.get('application.process.binary', ''))) == 'scrcpy':
+        return True
+    return any('scrcpy' in str(props.get(k, '')).lower() for k in ('application.name', 'node.name'))
+
+
+def _volumen_actual(flujo):
+    """Porcentaje del canal más alto ('100%' → 100), o None si pactl no lo da."""
+    vals = []
+    for canal in (flujo.get('volume') or {}).values():
+        m = re.match(r'\s*(\d+)%', str((canal or {}).get('value_percent', '')))
+        if m:
+            vals.append(int(m.group(1)))
+    return max(vals) if vals else None
+
+
+def flujos_scrcpy():
+    """Flujos de audio de scrcpy que suenan en el PC: (lista, '') o (None, error)."""
+    if not shutil.which(PACTL_EXEC):
+        return None, ('No se encontró pactl, que es lo que cambia el volumen de un programa '
+                      'en PipeWire/PulseAudio (en Arch viene en el paquete libpulse). '
+                      'Mientras tanto, el mezclador de volumen del escritorio muestra '
+                      'scrcpy como una app más.')
+    res = run([PACTL_EXEC, '-f', 'json', 'list', 'sink-inputs'], timeout=10)
+    if not res['success']:
+        return None, res['stderr'] or 'pactl no pudo listar los flujos de audio'
+    try:
+        datos = json.loads(res['stdout'] or '[]')
+    except ValueError:
+        return None, 'pactl no devolvió JSON: hace falta PulseAudio 16+ o PipeWire (pipewire-pulse)'
+    return [f for f in datos if isinstance(f, dict) and _es_flujo_scrcpy(f)], ''
+
+
+def act_pc_volume(op, nivel=''):
+    """Sube, baja (de 10 en 10) o fija el volumen de scrcpy en el PC, entre 0 y 150 %."""
+    if op not in ('subir', 'bajar', 'fijar'):
+        return _fail(f'Operación de volumen desconocida: {op}')
+    objetivo = None
+    if op == 'fijar':
+        objetivo = int(_int(nivel, 'Volumen'))
+        if not 0 <= objetivo <= _VOL_MAX:
+            raise ValueError(f'Volumen fuera de rango: {objetivo} (0-{_VOL_MAX} %)')
+    flujos, err = flujos_scrcpy()
+    if flujos is None:
+        return _fail(err)
+    if not flujos:
+        return _fail('No suena nada de scrcpy en el PC: abre antes la transmisión. El sonido '
+                     'pide Android 11+ y no llega al PC con «Solo en el móvil» ni con '
+                     '«Latencia mínima», que va sin audio.')
+    hechos = []
+    for flujo in flujos:
+        idx = str(flujo.get('index'))
+        if objetivo is not None:
+            nuevo = objetivo
+        else:
+            actual = _volumen_actual(flujo)
+            nuevo = (100 if actual is None else actual) + (_VOL_PASO if op == 'subir' else -_VOL_PASO)
+        nuevo = max(0, min(_VOL_MAX, nuevo))
+        res = run([PACTL_EXEC, 'set-sink-input-volume', idx, f'{nuevo}%'], timeout=10)
+        if not res['success']:
+            return _fail(res['stderr'] or f'pactl no pudo cambiar el volumen del flujo {idx}')
+        # Subir el volumen de un flujo silenciado no se oiría: se le quita el silencio.
+        if nuevo and flujo.get('mute'):
+            run([PACTL_EXEC, 'set-sink-input-mute', idx, '0'], timeout=10)
+        hechos.append(nuevo)
+    log_line(f'volumen scrcpy {op} -> {hechos}')
+    return _ok('Volumen de scrcpy en el PC: ' + ', '.join(f'{n} %' for n in hechos) +
+               (' (silencio)' if not any(hechos) else ''))
 
 
 # ----------------------------------------------------------------------
@@ -2054,6 +2209,7 @@ _ACTIONS = {
     'mdns_check': lambda v: act_mdns_check(),
     'mdns_services': lambda v: act_mdns_services(),
     'device_ip': lambda v: act_device_ip(),
+    'wifi_auto': lambda v: act_wifi_auto(v.get('port', '5555')),
     'get_state': lambda v: act_get_state(),
     'wait_for_device': lambda v: act_wait_for_device(),
     'push': lambda v: act_push(v.get('origen'), v.get('destino')),
@@ -2133,9 +2289,10 @@ _ACTIONS = {
     'netpolicy': lambda v: act_netpolicy(v.get('what')),
     'netpolicy_restrict': lambda v: act_netpolicy_restrict(v.get('estado')),
     'statusbar': lambda v: act_statusbar(v.get('what')),
-    'scrcpy': lambda v: act_scrcpy(v.get('mode', 'standard')),
+    'scrcpy': lambda v: act_scrcpy(v.get('mode', 'standard'), v),
     'scrcpy_game': lambda v: act_scrcpy_game(v),
     'scrcpy_list': lambda v: act_scrcpy_list(v.get('what')),
+    'pc_volume': lambda v: act_pc_volume(v.get('op'), v.get('nivel', '')),
     'game_mode': lambda v: act_game_mode(v.get('mode'), v.get('package')),
     'game_list': lambda v: act_game_list(v.get('what'), v.get('package')),
     'game_reset': lambda v: act_game_reset(v.get('package')),
